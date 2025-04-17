@@ -121,7 +121,12 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     """
     Creates preprocessing pipeline, runs it, and 
         saves the preprocessed result on disk
-    Returns the saved object
+    Returns updated carrier.
+    Configuration for preprocessing must have `methods` entrance and must be a list
+    of applied procedures. It can be empty for no preprocseccing.
+    Each procedure may have dictionary with parameters.
+    If there is `folder` key in configuration, this name will be used as folder name
+    instead of identifier to store preprocessed data on disk.
     """
     def resolvepreproc(si, cmd:str,rec,config:(dict,None)=None,logger):
         """
