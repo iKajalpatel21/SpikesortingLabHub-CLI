@@ -41,7 +41,7 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     Reads a recording, sets probe configuration, used channels, and bad channels.
     
     """
-    logger = logging.getLogger(os.path.basename(config['job_id']+identifier )
+    logger = logging.getLogger( config['job_id']+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -155,7 +155,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             logger.error(f'Unnknown perprocessing option{cmd}')
             raise RuntimeError(f'Unnknown perprocessing option{cmd}')
 
-    logger = logging.getLogger(os.path.basename(config['job_id']+identifier )
+    logger = logging.getLogger( config['job_id'] + identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -193,7 +193,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
         raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
     
-    preproc = [ carrier[ dependencies[0] ] ]s
+    preproc = [ carrier[ dependencies[0] ] ]
     for ppm in preprocconf['methods']:
         logger.info(f"PREPROC: {ppm}")
         config = preprocconf[ppm] if ppm in preprocconf else None
@@ -204,16 +204,163 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             raise RuntimeError(f'Cannot perform {ppm} in `{identifier}` section: {e}')
 
     preproc[-1].annotate(is_filtered=True)
-### WARNING > base sorting directory (i.e. last['running directory'])  should be replaced with something
     preproc_saved = preproc[-1].save(
-        folder = last['running directory']+'/'+(preprocconf['folder'] if 'folder' in preprocconf else identifier), 
+        folder = config['job_evn']['base_directory']+'/'+(preprocconf['folder'] if 'folder' in preprocconf else identifier), 
         chunk_duration = si.get_global_job_kwargs()['chunk_duration']
         )
-### <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
     carrier[identifier] = preproc_saved
     return carrier
 
+def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Creates and runs sorting, 
+       saves results in a directory, and cleans working directory
+    Returns updated carrier dictionary
+    """
 
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeErrorf('Cannot find `{identifier}` in the configuration')
+
+    sortconf = config[identifier]
+    if not type(sortconf) is dict:
+        logger.error(f'incorrect type of the `{identifier}` entrance: got {type(sortconf)} but should be a dictionary')
+        raise RuntimeErrorf(f'incorrect type of the `{identifier}` entrance: got {type(sortconf)} but should be a dictionary')
     
     
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeErrorf(f'`spikeinterfce[full]` must be installed to run sorting steps')
+
+
+
+    # if last['rerun']:
+        # delosdir('{running directory}/sorting-workingdir'.format(**last))
+        # delosdir('{running directory}/sorting-saved'.format(**last))
+
+    if not 'name' in sortconf:
+        logger.error(f'cannot find `name` in the sorting configuration {identifier}')
+        raise RuntimeError(f'cannot find `name` in the sorting configuration {identifier}')
+    if len(dependencies) != 1:
+        logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
+        raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
+    
+    preproc = carrier[ dependencies[0] ]
         
+    
+    if not 'parameters' in sortconf:
+        sortconf['parameters'] = {}
+        logger.warning("Cannot find sorter parameters - use default!")
+
+    if 'job_kwargs' in config['job_evn']:
+        sortconf['parameters']["job_kwargs"] = config['job_evn']['job_kwargs']
+    else:
+        def setadict(d:dict,prm:str,val):
+            for n in d:
+                if n == prm:
+                    d[n] = val
+                elif type(d[n]) is dict:
+                    d[n] = setadict(d[n],prm,val)
+            return d
+        sudict = {
+                "n_jobs": config['job_evn']['job_kwargs']["n_jobs"],
+                "total_memory": config['job_evn']['job_kwargs']["total_memory"],
+                "progress_bar": True,
+                "verbose" : True,
+                "useGPU" : True,
+                "overwrite" : True,
+                "num_workers" : config['job_evn']['job_kwargs']["n_jobs"],
+                "n_processors" : config['job_evn']['job_kwargs']["n_jobs"],
+                "n_gpu_processors" : 1,
+                "multi_processing" : True,
+                "core_dist_n_jobs" : config['job_evn']['job_kwargs']["n_jobs"],
+                "clustering_n_jobs" : config['job_evn']['job_kwargs']["n_jobs"],
+            }
+        for n in sudict:
+            sortconf['parameters'] = \
+                setadict(
+                    sortconf['parameters'],
+                    n,
+                    sudict[n]
+                )
+    #DB>>
+    logger.debug(json.dumps(sortconf,indent=4))
+    #<<DB
+    srdir = config['job_evn']['base_directory']+"/sorting-workingdir"
+    logger.info(f"SORTING: "+sortconf['name'])
+    if 'image' in sortconf:
+        logger.info(f' > Container : '+sortconf['image'])
+        conimage = sortconf['image']
+        if sys.platform == 'linux':
+            try:
+                sorting = si.run_sorter(
+                    sorter_name=sortconf['name'],
+                    recording=preproc, 
+                    folder=srdir,
+                    singularity_image = conimage,
+                    **sortconf['parameters'] )
+            except BaseException as e:
+                if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+                    shutil.copy(
+                        getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                    )
+                logger.error(f"Sorting failed: {e}")
+                raise RuntimeError(f"Sorting failed: {e}")
+        elif sys.platform == 'win32' or sys.platform == 'win64':
+            dockerpath = os.path.basename(conimage)
+            dockerpath,_ = os.path.splitext(dockerpath)
+            try:
+                sorting = si.run_sorter(
+                    sorter_name=sortconf['name'],
+                    recording=preproc, 
+                    folder=srdir,
+                    docker_image=f"spikeinterface/{dockerpath}",
+                    **sortconf['parameters'] )
+            except BaseException as e:
+                if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+                    shutil.copy(
+                        getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                    )
+                logger.error(f"Sorting failed: {e}")
+                raise RuntimeError(f"Sorting failed: {e}")
+        else:
+            logger.error(f"Sorting failed: unknow platform")
+            raise RuntimeError(f"Sorting failed: unknow platform")
+    else:
+        try:
+            sorting = si.run_sorter(
+                sorter_name=sortconf['name'],
+                recording=preproc, 
+                folder=srdir,
+                **sortconf['parameters'] )
+        except BaseException as e:
+            if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+                shutil.copy(
+                    getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
+                    getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                )
+            logger.error(f"Sorting failed: {e}")
+            raise RuntimeError(f"Sorting failed: {e}")
+
+    sorting_saved = sorting.save(folder=config['job_evn']['base_directory']+'/'+(sortconf['folder'] if 'folder' in sortconf else identifier))
+    carrier[identifier] = sorting_saved
+    logger.info(f"Sorting saved")
+
+    # if "save working dir" in last and type(last["save working dir"]) is bool and last["save working dir"]:
+        # return carrier    
+    # delosdir(f'{srdir}')
+    return carrier
+
+###<<<
