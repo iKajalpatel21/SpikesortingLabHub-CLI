@@ -13,38 +13,39 @@ from .__helpers import *
 
 
 STEP_DEPENDENCIES = {
+    "combined_recording": [],
     "recording": [],
     # Preprocessing needs only a recording
-    "preprocessing": ["recording"],
+    "preprocessing": [("recording","combined_recording")],
     # Loading a previously done preprocessing doesn't need anything
     "load_preprocessing": [],
-    # Sorting also needs only a preprocessing, load_preprocessing OR recording
+    # Sorting also needs only a preprocessing, load_preprocessing, combined_recording OR recording
     "sorting": [
-        ("recording", "preprocessing", "load_preprocessing")
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing")
     ],
     # Load a previously done sorting
     "load_sorting": [],
-    # Analyzer: the firs argument is a preprocessing, load_preprocessing OR recording, the second is sorting OR load_sorting
+    # Analyzer: the firs argument is a preprocessing, combined_recording, load_preprocessing OR recording, the second is sorting OR load_sorting
     "analyzer": [
-        ("recording", "preprocessing", "load_preprocessing"),
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
         ("sorting","load_sorting")
     ],
     # Load a previously done analyzer
     "load_analyzer": [],
-    # Exporting to phy: the firs argument is a preprocessing, load_preprocessing OR recording, the second is sorting  OR load_sorting
+    # Exporting to phy: the firs argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting
     "phy_export" : [
-        ("recording", "preprocessing", "load_preprocessing"),
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
         ("sorting","load_sorting")
     ],
-    # Importing from phy needs: the first argument is a preprocessing, load_preprocessing OR recording, the second is sorting  OR load_sorting, the last one is an phy_export
+    # Importing from phy needs: the first argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting, the last one is an phy_export
     "import_phy" : [
-        ("recording", "preprocessing", "load_preprocessing"),
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
         ("sorting","load_sorting"),
         "phy_export" 
     ],
-    # Report requires: the first argument is a preprocessing, load_preprocessing OR recording, the second is sorting  OR load_sorting, the last is analyzer OR load_analyzer
+    # Report requires: the first argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting, the last is analyzer OR load_analyzer
     "report": [
-        ("recording", "preprocessing", "load_preprocessing"),
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
         ("sorting","load_sorting"),
         ("analyzer","load_analyzer")
     ],
