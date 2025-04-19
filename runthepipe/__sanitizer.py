@@ -6,7 +6,7 @@ import json
 import psutil
 from numpy import *
 import copy as pycopy
-from __helpers import * 
+from .__helpers import * 
 
 """
 """
@@ -57,10 +57,10 @@ STEP_DEPENDENCIES = {
     "upload": [],
 }
 
-with open('__sorting_sanity.json') as fd:
-    j = json.load(fd)
+# with open('__sorting_sanity.json') as fd:
+    # j = json.load(fd)
 
-SORTING_SANITY,SI_VERSION = j['SORTING_SANITY'],j['SI_VERSION']
+# SORTING_SANITY,SI_VERSION = j['SORTING_SANITY'],j['SI_VERSION']
     
 
 def job_sanity(config:dict):
