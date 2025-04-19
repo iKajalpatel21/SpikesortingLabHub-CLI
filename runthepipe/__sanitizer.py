@@ -57,7 +57,11 @@ STEP_DEPENDENCIES = {
     "upload": [],
 }
 
-from __sorting_sanity import SORTING_SANITY,SI_VERSION
+with open('__sorting_sanity.json') as fd:
+    j = json.load(fd)
+
+SORTING_SANITY,SI_VERSION = j['SORTING_SANITY'],j['SI_VERSION']
+    
 
 def job_sanity(config:dict):
     logger = logging.getLogger( 'job_sanity_check' )
@@ -82,14 +86,14 @@ def job_sanity(config:dict):
             logger.error(f'The required job environment `{required_job_env}` is not set')
             raise RuntimeError(f'The required job environment `{required_job_env}` is not set')
         if not type(config['job_evn'][required_job_env]) is item_type:
-            logger.error('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type)
-            raise RuntimeError('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type)
+            logger.error('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type))
+            raise RuntimeError('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type))
     #optional variables
-    if 'log_level' in config['job_evn']:
+    # if 'log_level' in config['job_evn']:
         
         
         
 
-def steps_sanity(config:dict):
+# def steps_sanity(config:dict):
     
 
