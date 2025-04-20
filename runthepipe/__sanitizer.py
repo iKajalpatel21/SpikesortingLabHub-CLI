@@ -60,33 +60,56 @@ STEP_DEPENDENCIES = {
 }
 
 STEP_PARAMETERS = {
-    "preprocessing" : {
-        "required" : [ "methods" ],
-        "optional" : [ "centering", "highpass or band filtering", "referensing", "whitening", "zscore", "folder" ] 
+    "combined_recording" : {
+    },
+    "recording"    : {
+    },
+    "preprocessing": {
+        "required" : [ ("methods",list) ],
+        "optional" : [
+            ("centering",dict), 
+            ("highpass or band filtering",dict),
+            ("referensing",dict),
+            ("whitening",dict),
+            ("zscore",dict),
+            ("folder",str)
+        ] 
     },
     "load_preprocessing": {
-        "required" : [ "folder" ]
+        "required" : [ ("folder",str) ]
     },
     "sorting"      : {
-        "required" : [ "name", "parameters" ],
-        "optional" : [ "folder" ]
+        "required" : [
+            ("name",str),
+            ("parameters",dict)
+        ],
+        "optional" : [ ("folder",str) ]
     },
     "load_sorting" : {
-        "required" : [ "folder" ]
+        "required" : [ ("folder",str) ]
     },
     "analyzer"     : {
     },
     "load_analyzer": {
-        "required" : [ "folder" ]
+        "required" : [ ("folder",str) ]
     },
     "phy_export"   : {
-        "optional" : [ "folder" ]
+        "optional" : [ ("folder",str) ]
     },
     "import_from_phy" : {
-        "required" : [ "folder" ]
+        "required" : [ ("folder",str) ]
     },
     "export2matlab": {
-        "optional" : [ "filename" ]
+        "optional" : [ ("filename",str) ]
+    },
+    "upload"       : {
+        "required" : [
+            ("keep_base_directory",bool),
+            ("destination",str)
+        ],
+        "optional" : {
+            ("suffix",str)
+        }
     }
 }
 
