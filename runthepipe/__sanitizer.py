@@ -6,7 +6,10 @@ import json
 import psutil
 from numpy import *
 import copy as pycopy
-from .__helpers import * 
+try:
+    from .__helpers import *
+except:
+    from __helpers import *
 
 """
 """
@@ -37,11 +40,9 @@ STEP_DEPENDENCIES = {
         ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
         ("sorting","load_sorting")
     ],
-    # Importing from phy needs: the first argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting, the last one is an phy_export
-    "import_phy" : [
-        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
-        ("sorting","load_sorting"),
-        "phy_export" 
+    # Importing from phy needs: the only argument is a preprocessing, load_preprocessing, combined_recording OR recording
+    "import_from_phy" : [
+        ("recording", "combined_recording", "preprocessing", "load_preprocessing")
     ],
     # Report requires: the first argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting, the last is analyzer OR load_analyzer
     "report": [
@@ -56,6 +57,37 @@ STEP_DEPENDENCIES = {
     ],
     # Upload whatever was done!
     "upload": [],
+}
+
+STEP_PARAMETERS = {
+    "preprocessing" : {
+        "required" : [ "methods" ],
+        "optional" : [ "centering", "highpass or band filtering", "referensing", "whitening", "zscore", "folder" ] 
+    },
+    "load_preprocessing": {
+        "required" : [ "folder" ]
+    },
+    "sorting"      : {
+        "required" : [ "name", "parameters" ],
+        "optional" : [ "folder" ]
+    },
+    "load_sorting" : {
+        "required" : [ "folder" ]
+    },
+    "analyzer"     : {
+    },
+    "load_analyzer": {
+        "required" : [ "folder" ]
+    },
+    "phy_export"   : {
+        "optional" : [ "folder" ]
+    },
+    "import_from_phy" : {
+        "required" : [ "folder" ]
+    },
+    "export2matlab": {
+        "optional" : [ "filename" ]
+    }
 }
 
 # with open('__sorting_sanity.json') as fd:
@@ -90,11 +122,92 @@ def job_sanity(config:dict):
             logger.error('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type))
             raise RuntimeError('The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type))
     #optional variables
-    # if 'log_level' in config['job_evn']:
-        
-        
-        
+    if 'log_level' in config['job_evn']:
+        if not type(config['job_evn']['log_level']) is str:
+            logger.error('The environment variable `log_level` has a wrong type {}, but should be a string'.format(type(config['job_evn']['log_level'])))
+            raise RuntimeError('The environment variable `log_level` has a wrong type {}, but should be a string'.format(type(config['job_evn']['log_level'])))
+        if not config['job_evn']['log_level'] in 'NOTSET DEBUG WARNING ERROR CRITICAL'.split():
+            logger.error('The environment variable `log_level` has a wrong value {}, but should be one of these: NOTSET DEBUG WARNING ERROR CRITICAL'.format(config['job_evn']['log_level']))
+            raise RuntimeError('The environment variable `log_level` has a wrong value {}, but should be one of these: NOTSET DEBUG WARNING ERROR CRITICAL'.format(config['job_evn']['log_level']))
+    
+    if "REDIRECT" in config['job_evn']:
+        if not type(config['job_evn']['REDIRECT']) is dict:
+            logger.error('The environment variable `REDIRECT` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['REDIRECT'])))
+            raise RuntimeError('The environment variable `REDIRECT` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['REDIRECT'])))
+        for rdr in config['job_evn']['REDIRECT']:
+            if not rdr in 'log out err'.split():
+                logger.error(f'Unknown REDIRECT entrance {rdr}. Can redirect only log, out or err streams')
+                raise RuntimeError(f'Unknown REDIRECT entrance {rdr}. Can redirect only log, out or err streams')
+            if not type(config['job_evn']['REDIRECT'][rdr]) is str:
+                logger.error(f'REDIRECT entrance {rdr} has a wrong type. It should be a string only')
+                raise RuntimeError(f'REDIRECT entrance {rdr} has a wrong type. It should be a string only')
+    if 'envs' in config['job_evn']:
+        if not type(config['job_evn']['envs']) is dict:
+            logger.error('The environment variable `envs` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['envs'])))
+            raise RuntimeError('The environment variable `envs` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['envs'])))
+        for env in config['job_evn']['envs']:
+            if not type(config['job_evn']['envs'][env]) is str:
+                logger.error(f'envs entrance {env} has a wrong type. It should be a string only')
+                raise RuntimeError(f'envs entrance {env} has a wrong type. It should be a string only')
+    return 0
 
-# def steps_sanity(config:dict):
+
+def steps_sanity(config:dict):
+    logger = logging.getLogger( 'steps_sanity_check' )
+    steps = config['job_steps']
+    if len(steps) < 1:
+        logger.error('job_steps list is empty')
+        raise RuntimeError('job_steps list is empty')
+    prev_steps_ids = []
+    prev_steps_fun = []
+    for sid,s in enumerate(steps):
+        if not type(s) is dict:
+            logger.error(f'step #{sid+1} has a incorrect type {type(s)}, but should be a dictionary')
+            raise RuntimeError(f'step #{sid+1} has a incorrect type {type(s)}, but should be a dictionary')
+        for required_step_item, item_type in [('function',str), ('identifier',str), ('depends',list) ] :
+            if not required_step_item in s:
+                logger.error(f'required step key `{required_step_item}` is missing in the step #{sid+1}')
+                raise RuntimeError(f'required step key `{required_step_item}` is missing in the step #{sid+1}')
+            if not type(s[required_step_item]) is item_type:
+                logger.error(f'required step key `{required_step_item}` in the step #{sid+1} has an incorrect type {type(s[required_step_item])} but should be {item_type}')
+                raise RuntimeError(f'required step key `{required_step_item}` in the step #{sid+1} has an incorrect type {type(s[required_step_item])} but should be {item_type}')
+        for itm in s:
+            if not itm in  'function identifier depends'.split():
+                logger.error(f'Unknown entrance {itm} in step #{sid+1}')
+                raise RuntimeError(f'Unknown entrance {itm} in step #{sid+1}')
+        if not s['function'] in STEP_DEPENDENCIES:
+            logger.error('Unknown function `'+s['function']+f'` in step #{sid+1}. Should be one of these: '+', '.join([_ for _ in STEP_DEPENDENCIES]))
+            raise RuntimeError('Unknown function `'+s['function']+f'` in step #{sid+1}. Should be one of these: '+', '.join([_ for _ in STEP_DEPENDENCIES]))
+        
+        if s['identifier'] in prev_steps_ids:
+            logger.error('The identifier `{}` is not unique! Step #{} has the same identifier'.format(s['identifier'], prev_steps_ids.index(s['identifier'])+1) )
+            raise RuntimeError('The identifier `{}` is not unique! Step #{} has the same identifier'.format(s['identifier'], prev_steps_ids.index(s['identifier'])+1) )
+        allowed_dependencies = STEP_DEPENDENCIES[ s['function'] ] 
+        if len(allowed_dependencies) != len(s['depends']):
+            logger.error('Too many or Not enough dependencies in step #{}. Needs {} but given {}'.format(sid+1,len(allowed_dependencies),len(s['depends'])) )
+            raise RuntimeError('Too many or Not enough dependencies in step #{}. Needs {} but given {}'.format(sid+1,len(allowed_dependencies),len(s['depends'])) )
+        for depid,dep in enumerate(s['depends']):
+            if not dep in prev_steps_ids:
+                logger.error(f'There is no previous step with ID{dep} required for current step #{sid+1}' )
+                raise RuntimeError(f'There is no previous step with ID{dep} required for current step #{sid+1}' )
+            reffun = prev_steps_fun[ prev_steps_ids.index(dep) ]
+            if type(allowed_dependencies[depid]) is str and allowed_dependencies[depid] == reffun: pass
+            elif (type(allowed_dependencies[depid]) is list or type(allowed_dependencies[depid]) is tuple) and reffun in allowed_dependencies[depid]: pass
+            else:
+                logger.error(f'Dependence {dep} for current step #{sid+1} has an incorrect function {reffun} but should be (one of these) `{allowed_dependencies[depid]}`')
+                raise RuntimeError(f'Dependence {dep} for current step #{sid+1} has an incorrect function {reffun} but should be (one of these)  `{allowed_dependencies[depid]}`')
+        prev_steps_ids.append( s['identifier'] )
+        prev_steps_fun.append( s['function'] )
+    return 0
+            
+                
+if __name__ == '__main__':
+    with open(sys.argv[1]) as fd:
+        j = json.load(fd)
+    
+    print( job_sanity(j) )
+    print( steps_sanity(j) )
+        
+        
     
 
