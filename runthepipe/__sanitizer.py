@@ -59,64 +59,99 @@ STEP_DEPENDENCIES = {
     "upload": [],
 }
 
+
+def sanetize_sorting(config:dict):
+    
+    with open('__sorting_sanity.json') as fd:
+        j = json.load(fd)
+
+    SORTING_SANITY,SI_VERSION = j['SORTING_SANITY'],j['SI_VERSION']
+
+    return 0            
+
+# The first character of the name defines where it is *required or >optional parameter,
+# if a value is a tuple - it is a choice.
+# if a value is a list with one element - any number of elements are allowed, 
+#    otherwise number of elements should be strictly equal to the number of elements in the list.
 STEP_PARAMETERS = {
     "combined_recording" : {
     },
-    "recording"    : {
-    },
+    "recording"    : (
+            {
+                '*binfile'            : str,
+                '*probe'              : str,
+                '*sampling rate'      : (int, float),
+                '*number of channels' : int,
+                ">remove"             : [ int ],
+                ">bad_channels"       : [ int ],
+                ">location"           : str,
+                ">gain_to_uV"         : (int, float),
+                ">offset_to_uV"       : (int, float)
+            },
+            {
+                '*neuralynx'          : str
+            }
+    ),
     "preprocessing": {
-        "required" : [ ("methods",list) ],
-        "optional" : [
-            ("centering",dict), 
-            ("highpass or band filtering",dict),
-            ("referensing",dict),
-            ("whitening",dict),
-            ("zscore",dict),
-            ("folder",str)
-        ] 
+        "*methods": [ str ] ,
+        ">centering" : {
+            '>mode': ('median', 'mean')
+        }, 
+        ">highpass or band filtering" : {
+            '>btype' : ('bandpass', 'highpass'),
+            '>band'  : (float, [float,float])
+        },
+        ">referensing" : { 
+            '>reference': ('global', 'single', 'local'),
+            '>operator' : ('median', 'average'),
+            '>groups'   : ( [int]  ,  None ),
+            '>local_radius' : [int, int],
+            '>ref_channel_ids' : [int]
+        },
+        ">whitening" : {
+            '>mode'      : ('global', 'local'),
+            '>radius_um' : (float, None), 
+            '>apply_mean': bool,
+            '>int_scale' : (float, None),
+            '>eps'       : (float, None)
+        },
+        ">zscore": {
+            '>mode' : ('median+mad', 'mean+std')
+        },
+        "folder":str
     },
     "load_preprocessing": {
-        "required" : [ ("folder",str) ]
+        "*folder": str
     },
     "sorting"      : {
-        "required" : [
-            ("name",str),
-            ("parameters",dict)
-        ],
-        "optional" : [ ("folder",str) ]
+        "*name"       : str,
+        "*parameters" : dict,
+        ">folder"     : str,
+        ">image"      : str
     },
     "load_sorting" : {
-        "required" : [ ("folder",str) ]
+        "*folder"  : str
     },
     "analyzer"     : {
     },
     "load_analyzer": {
-        "required" : [ ("folder",str) ]
+        "*folder"  : str
     },
     "phy_export"   : {
-        "optional" : [ ("folder",str) ]
+        ">folder"  : str
     },
     "import_from_phy" : {
-        "required" : [ ("folder",str) ]
+        ">folder"  : str
     },
     "export2matlab": {
-        "optional" : [ ("filename",str) ]
+        ">filename": str
     },
     "upload"       : {
-        "required" : [
-            ("keep_base_directory",bool),
-            ("destination",str)
-        ],
-        "optional" : {
-            ("suffix",str)
-        }
+        "*destination"        : str,
+        ">keep_base_directory": bool,
+        ">suffix"             : str
     }
 }
-
-# with open('__sorting_sanity.json') as fd:
-    # j = json.load(fd)
-
-# SORTING_SANITY,SI_VERSION = j['SORTING_SANITY'],j['SI_VERSION']
     
 
 def job_sanity(config:dict):
@@ -175,8 +210,8 @@ def job_sanity(config:dict):
     return 0
 
 
-def steps_sanity(config:dict):
-    logger = logging.getLogger( 'steps_sanity_check' )
+def job_steps_sanity(config:dict):
+    logger = logging.getLogger( 'job_steps_sanity_check' )
     steps = config['job_steps']
     if len(steps) < 1:
         logger.error('job_steps list is empty')
@@ -222,13 +257,95 @@ def steps_sanity(config:dict):
         prev_steps_ids.append( s['identifier'] )
         prev_steps_fun.append( s['function'] )
     return 0
-            
-                
+
+def steps_sanity(config:dict):
+    def check_an_enry(entry,sch):
+        
+        if   type(sch) is tuple:
+            logger.debug(f"TUPLE > {entry} {sch}")
+            for s in sch:
+                x = check_an_enry(entry,s)
+                logger.debug(f"  T > {entry} {s} = {x}")
+                if x == 0: return 0
+            return f'entry {entry} does not match any options in schema'
+        elif type(sch) is str:
+            if type(entry) is str:
+                return f'string `{entry}` != `{sch}`' if entry != sch else 0
+            else:
+                return f'entry `{entry}` is not a string'
+        elif sch is None:
+            if entry is None: return 0
+            return f'entry `{entry}` is not None'
+        elif sch in (str, bool, int, float, list, dict):
+            if type(entry) is sch: return 0
+            return f'entry `{entry}` is not a {sch}'
+        elif type(sch) is list:
+            if not type(entry) is list: return f'entry `{entry}` is not a list'
+            if   len(sch) == 0:
+                 return 0
+            elif len(sch) == 1:
+                for entid,ent in enumerate(entry):
+                    x = check_an_enry(ent,sch[0])
+                    if x != 0:
+                        return f'list entry #{entid} returns error: {x}'
+                return 0
+            elif len(sch) != len(entry):
+                return f'size of {sch} and {entry} are not the same'
+            else:
+                for entid,(s,e) in enumerate(zip(sch,entry)):
+                    x = check_an_enry(e,s)
+                    if x != 0:
+                        return f'list entry #{entid} returns error: {x}'
+                return 0
+        elif type(sch) is dict:
+            if not type(entry) is dict: return f'entry `{entry}` is not a dictionary'
+            reqnames = [ x[1:] for x in sch if x[0] == '*' ]
+            optnames = [ x[1:] for x in sch if x[0] == '>' ]
+            allnames = [ x[1:] for x in sch                ]
+            for n in reqnames:
+                if not n in entry:
+                    return f'key `{n}` is missing in entry `{entry}`'
+                x = check_an_enry(entry[n],sch['*'+n])
+                if x != 0:
+                    return f'dictionary entry {n} returns error: {x}'
+            for n in optnames:
+                if not n in entry: continue
+                x = check_an_enry(entry[n],sch['>'+n])
+                if x != 0:
+                    return f'dictionary entry {n} returns error: {x}'
+            for n in entry:
+                if not n in allnames:
+                    return f'unknown entry `{n}` for a dictionary'
+            return 0
+        else:
+            return f'we should be here! {entry}, {sch}'
+        
+    logger = logging.getLogger( 'job_steps_sanity_check' )
+    steps = config['job_steps']
+    for sid,s in enumerate(steps):
+        stepfn = s[ 'function' ]
+        stepid = s['identifier']
+        if not stepid in config:
+            continue
+        stepsm = STEP_PARAMETERS[ stepfn ]
+        steppr = config[stepid]
+        x = check_an_enry(steppr,stepsm)
+        if x !=0:
+            logger.error(f'step #{sid+1} return an error {x}')
+            raise RuntimeError(f'step #{sid+1} return an error {x}')
+    return 0
+        # print(stepsm,steppr)
+    
 if __name__ == '__main__':
+    logging.basicConfig(
+        format='%(asctime)s:%(name)-33s:%(lineno)-6d%(levelname)-8s:%(message)s', \
+        level="DEBUG" )
+
     with open(sys.argv[1]) as fd:
         j = json.load(fd)
     
     print( job_sanity(j) )
+    print( job_steps_sanity(j) )
     print( steps_sanity(j) )
         
         
