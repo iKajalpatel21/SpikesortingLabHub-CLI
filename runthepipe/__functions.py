@@ -6,8 +6,14 @@ import json
 import psutil
 from numpy import *
 import copy as pycopy
-from __helpers import * 
 
+try:
+    from .__helpers import *
+except:
+    from __helpers import *
+
+try:
+    from .__sanitizer import STEP_PARAMETERS,step_sanity
 """
 These are main functions for both CLI until `runthepipe` and SpikesortingLabHub worker.
 In both cases a spikesorting job is a sequence of steps. Each step is a single function call.
@@ -35,7 +41,103 @@ Each step function has the same arguments:
 |  `carrier`   |    dict     | Results of the previous steps                                   |
 """
 
+def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    
+    Combines several binary files in a one and creates a recording, then sets probe configuration, used channels, and bad channels.
+    
+    """
+    logger = logging.getLogger( config['job_id']+identifier )
 
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'combined_recording',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `combined_recording`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `combined_recording`: {x}')
+
+    recconf = config[identifier]
+        
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    
+    try:
+        import spikeinterface.full as si
+        from probeinterface import read_probeinterface
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+    
+    buffersize = 4096
+    try:
+        with open(recconf['combined file'],'wb') as outfd:
+            for infile in recconf['input files']:
+                with open(infile,'rb') as infd:
+                    while True:
+                        xbf = infd.read(buffersize)
+                        if not xbf : break
+                        outfd.write(xbf)
+    except BaseException as e:
+        logger.error(f'Cannot combined files into one: {e}')
+        raise RuntimeError(f'Cannot combined files into one: {e}')
+
+    rec_scales = {}
+    if 'gain_to_uV' in recconf:
+        rec_scales['gain_to_uV'] = recconf['gain_to_uV']
+        rec_scales['offset_to_uV'] = 0.0
+    if 'offset_to_uV' in recconf:
+        rec_scales['offset_to_uV'] = recconf['offset_to_uV']
+    if not os.path.isfile(recconf['binfile']):
+        if 'location' in recconf:
+            logger.warning('File {} does not exist, trying to read original source {}'.format(recconf['binfile'],recconf['location']))
+            recconf['binfile'] = recconf['location']
+            if not os.path.isfile(recconf['binfile']):
+                logger.error('File {} does not exist'.format(recconf['binfile']))
+                raise RuntimeError('Both binary file {} and source recording do not exist'.format(recconf['binfile'],recconf['location']))
+            logger.info("=== USING FILE from the original source ===")
+        else:
+            logger.error('File {} does not exist, but location of the original source not given'.format(recconf['binfile']))
+            raise RuntimeError('File {} does not exist, but location of the original source not given'.format(recconf['binfile']))
+    
+    for reqvar in ('probe','sampling rate','number of channels'):
+        if not reqvar in recconf:
+            logger.error(f'cannot find `{reqvar}` in thre recording configuration {identifier}')
+            raise RuntimeError(f'cannot find `{reqvar}` in thre recording configuration {identifier}')
+            
+    while len(recconf['probe']) != 0 and not os.path.isfile(recconf['probe']):
+        recconf['probe'] = '/'.join(recconf['probe'].split('/')[1:])
+    if len(recconf['probe']) == 0:
+        logger.error('Probe file cannot be found')
+        raise RuntimeError('Probe file cannot be found')
+        
+    recording = si.BinaryRecordingExtractor(
+        recconf['combined file'],recconf['sampling rate'],
+        'int16', num_channels=recconf['number of channels'],
+        **rec_scales )
+    
+    if     "remove" in recconf\
+      and type(recconf["remove"]) is list\
+      and  len(recconf["remove"]) > 0:
+        recording = recording.remove_channels(recconf["remove"])
+
+    prob = read_probeinterface(recconf['probe']).probes[0]
+    recording.set_probe(prob,in_place=True)
+    
+    if      "bad_channels" in recconf \
+        and type(recconf["bad_channels"]) is list\
+        and  len(recconf["bad_channels"]) > 0:
+        recording = recording.remove_channels(recconf["bad_channels"])
+    
+    carrier[identifier] = recording
+    return carrier
+       
 def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
     Reads a recording, sets probe configuration, used channels, and bad channels.
@@ -45,12 +147,12 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
-        raise RuntimeErrorf('Cannot find `{identifier}` in the configuration')
+        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
 
     recconf = config[identifier]
     if not type(recconf) is dict:
         logger.error(f'incorrect type of the `{identifier}` entrance: got {type(recconf)} but should be a dictionary')
-        raise RuntimeErrorf(f'incorrect type of the `{identifier}` entrance: got {type(recconf)} but should be a dictionary')
+        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(recconf)} but should be a dictionary')
     
     
     if 'envs' in config['job_evn']:
@@ -65,7 +167,7 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         from probeinterface import read_probeinterface
     except:
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeErrorf(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
     if   'binfile' in recconf:
         rec_scales = {}
         if 'gain_to_uV' in recconf:
@@ -159,12 +261,12 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
-        raise RuntimeErrorf('Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
 
     preprocconf = config[identifier]
     if not type(preprocconf) is dict:
         logger.error(f'incorrect type of the `{identifier}` entrance: got {type(preprocconf)} but should be a dictionary')
-        raise RuntimeErrorf(f'incorrect type of the `{identifier}` entrance: got {type(preprocconf)} but should be a dictionary')
+        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(preprocconf)} but should be a dictionary')
     
     
     if 'envs' in config['job_evn']:
@@ -177,7 +279,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         import spikeinterface.full as si
     except:
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeErrorf(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
     
     
     # if last['rerun']:
@@ -222,12 +324,12 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
-        raise RuntimeErrorf('Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
 
     sortconf = config[identifier]
     if not type(sortconf) is dict:
         logger.error(f'incorrect type of the `{identifier}` entrance: got {type(sortconf)} but should be a dictionary')
-        raise RuntimeErrorf(f'incorrect type of the `{identifier}` entrance: got {type(sortconf)} but should be a dictionary')
+        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(sortconf)} but should be a dictionary')
     
     
     if 'envs' in config['job_evn']:
@@ -240,7 +342,7 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         import spikeinterface.full as si
     except:
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeErrorf(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
 
 
 
@@ -294,7 +396,7 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
                     sudict[n]
                 )
     #DB>>
-    logger.debug(json.dumps(sortconf,indent=4))
+    logger.debug(f" > configuration = {json.dumps(sortconf,indent=4)}")
     #<<DB
     srdir = config['job_evn']['base_directory']+"/sorting-workingdir"
     logger.info(f"SORTING: "+sortconf['name'])
@@ -364,6 +466,124 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     return carrier
 
 ###>>>
+    
+def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Creates and runs analyzer, 
+       saves results in a directory
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    analyzeconf = config[identifier]
+    if not type(analyzeconf) is dict:
+        logger.error(f'incorrect type of the `{identifier}` entrance: got {type(analyzeconf)} but should be a dictionary')
+        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(analyzeconf)} but should be a dictionary')
+    
+    
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+
+    logger.info(f"ANALYZER:")
+    if len(dependencies) != 2:
+        logger.error(f'dependences should have only two items, but got {len(dependencies)}')
+        raise RuntimeError(f'dependences should have only two items, but got {len(dependencies)}')
+    
+    subfolder = analyzeconf['folder'] if 'folder' in analyzeconf else identifier
+    logger.info(f" > folder : {subfolder}")
+    recording  = carrier[ dependencies[0] ]
+    sorting    = carrier[ dependencies[1] ]
+    try:    
+        analyzer = si.create_sorting_analyzer(
+            recording=recording,
+            sorting=sorting,
+            folder=config['job_evn']['base_directory']+f'/{subfolder}',
+            format="binary_folder",
+            overwrite=True
+            )
+    except BaseException as e:
+        logger.error(f"Cannot create an analyser: {e}")
+        raise RuntimeError(f"Cannot create an analyser: {e}")
+    if not 'metrics' in analyzeconf:
+        logger.warning('analyzer section exist bu does not have metrics to compute')
+        raise RuntimeWarning('analyzer section exist bu does not have metrics to compute')
+    def recursive_extensions(analyzer,mm:str):
+        ext = si.sortinganalyzer.get_extension_class(mm)
+        for dep in ext.depend_on:
+            for x in dep.split('|'):
+                if not analyzer.has_extension(x):
+                    recursive_extensions(analyzer,x)
+                    analyzer.compute(input=x)
+                    logger.warning(f'For metric {mm} computed extension {dep} with default parameters')
+        
+    def move_at_front(l:list,mm:str):
+        logger.debug(f'   >  list:{l} mm:{mm}')
+        mmid = l.index(mm)
+        ext = [
+            x for dep in si.sortinganalyzer.get_extension_class(mm).depend_on \
+              for x in dep.split('|')
+        ]
+        logger.debug(f'    >  ext :{ext}')
+        for x in ext:
+            if not x in l[:mmid]:
+                if x in l:
+                    l.remove(x)
+                    l = l[:mmid]+[x]+l[mmid:]
+                    l = move_at_front(l,x)
+                else:
+                    l = [x]+l
+        return l
+
+    logger.debug(f' > putting metrics in right order')
+    #logger.debug(f'   > '+ analyzeconf['metrics'])
+    metrics = [ mm for mm in analyzeconf['metrics'] ]
+    logger.debug(f' > Metrics before sotring {metrics}')
+    logger.info(f' > Processing metrics: {metrics}')
+    for mm in analyzeconf['metrics']:
+        if not mm in si.get_available_analyzer_extensions():
+            logger.error(f"An requested metric {mm} is not valid metric. Valid metric are {si.get_available_analyzer_extensions()}")
+            raise RuntimeError(f"An requested metric {mm} is not valid metric. Valid metric are {si.get_available_analyzer_extensions()}")
+        metrics = move_at_front(metrics, mm)
+    logger.debug(f' > Computing metrics: {metrics}')
+    analyzer.compute(input=metrics, extension_params=analyzeconf['metrics'])
+    logger.info(f' > Analysise of {metrics} complite!')
+    carrier[identifier] = analyzer
+    logger.info(f"Sorting saved")
+    logger.info(f' > Analysise is finished')
+    return carrier
+
+    # if 'report' in analyzeconf:
+        # if type(analyzeconf['report']) is str:
+            # reportdir = config['job_evn']['base_directory']+'/'+analyzeconf['report']
+            # if last['rerun']:
+                # delosdir(reportdir)
+            # from spikeinterface.exporters import export_report
+            # try:
+                # export_report(
+                    # sorting_analyzer=analyzer, 
+                    # output_folder=reportdir
+                # )
+            # except BaseException as e:
+                # logger.error(f"Cannot export a report: {e}")
+                # raise RuntimeError(f"Cannot export a report: {e}")
+            # logger.info(f' > report is exported to {reportdir}')
+        # else:
+            # logger.error(f"report is not a string - cannot export the report")
+
 def runphyexport(last,preproc_saved,sorting_saved):
     logger = logging.getLogger(os.path.basename(last['running directory'])+"-runphyexport" )
     if not 'phy' in last:
@@ -393,7 +613,7 @@ def runphyexport(last,preproc_saved,sorting_saved):
         # raise RuntimeError(f"Cannot create and analyzer: {e}")
         return 1
 
-    phydir = last['running directory']+'/'+ ( last['phy']['folder'] if 'folder' in last['phy'] else 'phy')
+    phydir = config['job_evn']['base_directory']+'/'+ ( last['phy']['folder'] if 'folder' in last['phy'] else 'phy')
     try:
         export_to_phy(
             sorting_analyzer = pyan,
