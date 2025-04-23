@@ -67,8 +67,8 @@ STEP_DEPENDENCIES = {
 #    otherwise number of elements should be strictly equal to the number of elements in the list.
 STEP_PARAMETERS = {
     "combined_recording" : {
-        '*combined files'     : [ str ],
-        '*binfile'            : str,
+        '*input files'        : [ str ],
+        '*combined file'      : str,
         '*probe'              : str,
         '*sampling rate'      : (int, float),
         '*number of channels' : int,
@@ -91,7 +91,9 @@ STEP_PARAMETERS = {
                 ">offset_to_uV"       : (int, float)
             },
             {
-                '*neuralynx'          : str
+                '*neuralynx'          : str,
+                '*probe'              : str,
+                ">bad_channels"       : [ int ],
             }
     ),
     "preprocessing": {
@@ -99,10 +101,15 @@ STEP_PARAMETERS = {
         ">centering" : {
             '>mode': ('median', 'mean')
         }, 
-        ">highpass or band filtering" : {
-            '>btype' : ('bandpass', 'highpass'),
-            '>band'  : (float, [float,float])
-        },
+        ">highpass or band filtering" : (
+            {
+            '*btype' : 'bandpass',
+            '*band'  : [float,float]
+            },{
+            '*btype' : 'highpass',
+            '*band'  : float
+            }
+        ),
         ">referensing" : { 
             '>reference': ('global', 'single', 'local'),
             '>operator' : ('median', 'average'),
@@ -278,7 +285,15 @@ def job_steps_sanity(config:dict)->(int,str):
                 continue
             if x != 0:
                 return f'analyzer parameters {stepid} have inconsistencies: {x}' 
-                
+        elif stepfn == 'preprocessing':
+            try:
+                x = sanitize_preprocessing(config,s['identifier'])
+            except BaseException as e:
+                logger.warning(f'Cannot sanitize parameters of the step #{sid+a}: {e}')
+                continue
+            if x != 0:
+                return f'preprocessing parameters {stepid} have inconsistencies: {x}' 
+            
         prev_steps_ids.append( stepid )
         prev_steps_fun.append( stepfn )
 
@@ -292,6 +307,14 @@ def step_sanity(config:dict, function:str, identifier:str)->(int,str):
     stepsm = STEP_PARAMETERS[ function ]
     steppr = config[identifier]
     return check_schema_an_enry(steppr,stepsm)
+
+def sanitize_preprocessing(config:dict,identifier:str)->(int,str):
+    methods    = config[identifier]['methods']
+    allmethods = [ x[1:] for x in  STEP_PARAMETERS['preprocessing'] if x != "*methods" ]
+    for method in methods:
+        if not method in allmethods:
+            return f"Unknown method `{method}` in preprocessing `{identifier}`"
+    return 0
 
 def sanitize_sorting(config:dict,identifier:str)->(int,str):
     try:
