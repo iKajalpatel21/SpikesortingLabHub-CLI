@@ -149,10 +149,13 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         logger.error(f'Cannot find `{identifier}` in the configuration')
         raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
 
+    x = step_sanity(config,'recording',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `recording`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `recording`: {x}')
+
+
     recconf = config[identifier]
-    if not type(recconf) is dict:
-        logger.error(f'incorrect type of the `{identifier}` entrance: got {type(recconf)} but should be a dictionary')
-        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(recconf)} but should be a dictionary')
     
     
     if 'envs' in config['job_evn']:
@@ -216,8 +219,6 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         recording = recording.remove_channels(recconf["bad_channels"])
     carrier[identifier] = recording
     return carrier
-
-
     
 def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
@@ -263,12 +264,13 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'Cannot find `{identifier}` in the configuration')
         raise RuntimeError('Cannot find `{identifier}` in the configuration')
 
+    x = step_sanity(config,'preprocessing',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
+
     preprocconf = config[identifier]
-    if not type(preprocconf) is dict:
-        logger.error(f'incorrect type of the `{identifier}` entrance: got {type(preprocconf)} but should be a dictionary')
-        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(preprocconf)} but should be a dictionary')
-    
-    
+
     if 'envs' in config['job_evn']:
         if type(config['job_evn']['envs']) is dict:
             for ev in config['job_evn']['envs']:
@@ -311,8 +313,45 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         chunk_duration = si.get_global_job_kwargs()['chunk_duration']
         )
     carrier[identifier] = preproc_saved
+    logger.info(f'Preprocessing `{identifier}` is done')
     return carrier
 
+def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'preprocessing',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
+
+    preprocconf = config[identifier]
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+    
+    preprocdir = preprocconf['folder']
+    try:
+        preproc = si.load_extractor(preprocdir)
+    except BaseException as e:
+        logger.error(f'Cannot read preprocessing from the folder {preprocdir}: {e}')
+        raise RuntimeError(f'Cannot read preprocessing from the folder {preprocdir}: {e}')
+    carrier[identifier] = preproc
+    logger.info(f'Preprocessing `{identifier}` was loaded from the directory {preprocdir}')
+    return carrier
+    
 def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
     Creates and runs sorting, 
