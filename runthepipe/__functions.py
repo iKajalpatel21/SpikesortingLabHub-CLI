@@ -266,8 +266,13 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
 
     x = step_sanity(config,'preprocessing',identifier)
     if x != 0:
-        logger.error(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
-        raise RuntimeError(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
+
+    x = sanitize_sorting(config, identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
 
     preprocconf = config[identifier]
 
@@ -283,19 +288,19 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
         raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
     
-    
+        
     # if last['rerun']:
         # delosdir('{running directory}/{folder}'.format(folder=(preprocconf['folder'] if 'folder' in preprocconf else "preprocessed"),**last))
 
-    if not   'methods' in preprocconf:
-        logger.error(f'There is not a `methods` section in `{identifier}` section')
-        raise RuntimeError(f'There is not a `methods` section in `{identifier}` section')
-    if not type(preprocconf['methods']) is list:
-        logger.error(f'The `methods` section in `{identifier}` section is not a list')
-        raise RuntimeError(f'The `methods` section in `{identifier}` section is not a list')
-    if len(dependencies) != 1:
-        logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
-        raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
+    # if not   'methods' in preprocconf:
+        # logger.error(f'There is not a `methods` section in `{identifier}` section')
+        # raise RuntimeError(f'There is not a `methods` section in `{identifier}` section')
+    # if not type(preprocconf['methods']) is list:
+        # logger.error(f'The `methods` section in `{identifier}` section is not a list')
+        # raise RuntimeError(f'The `methods` section in `{identifier}` section is not a list')
+    # if len(dependencies) != 1:
+        # logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
+        # raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
     
     preproc = [ carrier[ dependencies[0] ] ]
     for ppm in preprocconf['methods']:
@@ -323,12 +328,10 @@ def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carr
         logger.error(f'Cannot find `{identifier}` in the configuration')
         raise RuntimeError('Cannot find `{identifier}` in the configuration')
 
-    x = step_sanity(config,'preprocessing',identifier)
+    x = step_sanity(config,'load_preprocessing',identifier)
     if x != 0:
-        logger.error(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
-        raise RuntimeError(f'There is inconsistencies in the configuration for `preprocessing`: {x}')
-
-    preprocconf = config[identifier]
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `load_preprocessing`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `load_preprocessing`: {x}')
 
     if 'envs' in config['job_evn']:
         if type(config['job_evn']['envs']) is dict:
@@ -342,7 +345,7 @@ def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carr
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
         raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
     
-    preprocdir = preprocconf['folder']
+    preprocdir = config[identifier]['folder']
     try:
         preproc = si.load_extractor(preprocdir)
     except BaseException as e:
@@ -352,7 +355,7 @@ def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carr
     logger.info(f'Preprocessing `{identifier}` was loaded from the directory {preprocdir}')
     return carrier
     
-def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
     Creates and runs sorting, 
        saves results in a directory, and cleans working directory
@@ -364,6 +367,16 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
         raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'sorting',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `sorting`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `sorting`: {x}')
+
+    x = sanitize_sorting(config,identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `sorting`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `sorting`: {x}')
 
     sortconf = config[identifier]
     if not type(sortconf) is dict:
@@ -389,12 +402,12 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         # delosdir('{running directory}/sorting-workingdir'.format(**last))
         # delosdir('{running directory}/sorting-saved'.format(**last))
 
-    if not 'name' in sortconf:
-        logger.error(f'cannot find `name` in the sorting configuration {identifier}')
-        raise RuntimeError(f'cannot find `name` in the sorting configuration {identifier}')
-    if len(dependencies) != 1:
-        logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
-        raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
+    # if not 'name' in sortconf:
+        # logger.error(f'cannot find `name` in the sorting configuration {identifier}')
+        # raise RuntimeError(f'cannot find `name` in the sorting configuration {identifier}')
+    # if len(dependencies) != 1:
+        # logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
+        # raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
     
     preproc = carrier[ dependencies[0] ]
         
@@ -437,7 +450,7 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     #DB>>
     logger.debug(f" > configuration = {json.dumps(sortconf,indent=4)}")
     #<<DB
-    srdir = config['job_evn']['base_directory']+"/sorting-workingdir"
+    srdir = config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir"
     logger.info(f"SORTING: "+sortconf['name'])
     if 'image' in sortconf:
         logger.info(f' > Container : '+sortconf['image'])
@@ -451,10 +464,10 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
                     singularity_image = conimage,
                     **sortconf['parameters'] )
             except BaseException as e:
-                if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+                if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                     shutil.copy(
-                        getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
-                        getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                        getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                     )
                 logger.error(f"Sorting failed: {e}")
                 raise RuntimeError(f"Sorting failed: {e}")
@@ -469,10 +482,10 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
                     docker_image=f"spikeinterface/{dockerpath}",
                     **sortconf['parameters'] )
             except BaseException as e:
-                if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+                if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                     shutil.copy(
-                        getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
-                        getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                        getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                     )
                 logger.error(f"Sorting failed: {e}")
                 raise RuntimeError(f"Sorting failed: {e}")
@@ -487,10 +500,10 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
                 folder=srdir,
                 **sortconf['parameters'] )
         except BaseException as e:
-            if os.path.isfile(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"):
+            if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                 shutil.copy(
-                    getospath(config['job_evn']['base_directory']+"/sorting-workingdir/spikeinterface_log.json"),
-                    getospath(config['job_evn']['base_directory']+"/spikeinterface_sorter_log.json")
+                    getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                    getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                 )
             logger.error(f"Sorting failed: {e}")
             raise RuntimeError(f"Sorting failed: {e}")
@@ -501,10 +514,48 @@ def sortering(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
 
     # if "save working dir" in last and type(last["save working dir"]) is bool and last["save working dir"]:
         # return carrier    
-    # delosdir(f'{srdir}')
+    delosdir(f'{srdir}')
     return carrier
 
-###>>>
+
+def load_sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Loads sorting from a folder
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'load_sorting',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `load_sorting`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `load_sorting`: {x}')
+        
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+    sortdir = config[identifier]['folder']
+    try:
+        sorting = si.load_extractor(sortdir)
+    except BaseException as e:
+        logger.error(f'Cannot read sorting from the folder {sortdir}: {e}')
+        raise RuntimeError(f'Cannot read sorting from the folder {sortdir}: {e}')
+    carrier[identifier] = sorting
+    logger.info(f'sorting `{identifier}` was loaded from the directory {sortdir}')
+    return carrier
+        
     
 def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
@@ -519,10 +570,17 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         logger.error(f'Cannot find `{identifier}` in the configuration')
         raise RuntimeError('Cannot find `{identifier}` in the configuration')
 
+    x = step_sanity(config,'analyzer',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `analyzer`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `analyzer`: {x}')
+
+    x = sanitize_analyzer(config,identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `analyzer`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `analyzer`: {x}')
+
     analyzeconf = config[identifier]
-    if not type(analyzeconf) is dict:
-        logger.error(f'incorrect type of the `{identifier}` entrance: got {type(analyzeconf)} but should be a dictionary')
-        raise RuntimeError(f'incorrect type of the `{identifier}` entrance: got {type(analyzeconf)} but should be a dictionary')
     
     
     if 'envs' in config['job_evn']:
@@ -537,11 +595,7 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
         raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
 
-    logger.info(f"ANALYZER:")
-    if len(dependencies) != 2:
-        logger.error(f'dependences should have only two items, but got {len(dependencies)}')
-        raise RuntimeError(f'dependences should have only two items, but got {len(dependencies)}')
-    
+    logger.info(f"ANALYZER:")    
     subfolder = analyzeconf['folder'] if 'folder' in analyzeconf else identifier
     logger.info(f" > folder : {subfolder}")
     recording  = carrier[ dependencies[0] ]
@@ -605,6 +659,110 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     logger.info(f' > Analysise is finished')
     return carrier
 
+def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Load analyzer and all extensions from a directory
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'load_analyzer',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `load_analyzer`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `load_analyzer`: {x}')
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+
+    analyzerdir = config[identifier]['folder']
+    try:
+        analyzer = si.load_sorting_analyzer(analyzerdir)
+    except BaseException as e:
+        logger.error(f'Cannot laod  analyzer from the folder {analyzerdir}: {e}')
+        raise RuntimeError(f'Cannot laod analyzer from the folder {analyzerdir}: {e}')
+    carrier[identifier] = analyzer
+    logger.info(f'analyzer `{identifier}` was loaded from the directory {analyzerdir}')
+    return carrier
+
+def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Exports sorting into ph
+    carrier is updated with phy directory name.
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'phy_export',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `phy_export`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `phy_export`: {x}')
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+
+    preproc = carrier[ dependencies[0] ]
+    sorting = carrier[ dependencies[1] ]
+
+    logger.info(f"EXPORTING PHY")
+    try:
+        pyan = si.create_sorting_analyzer(
+            recording=preproc,
+            sorting=sorting)
+    except BaseException as e:
+        logger.error(f"Cannot create an analyzer for phy exporting `{identifier}`: {e}")
+        raise RuntimeError(f"Cannot create an analyzer for phy exporting `{identifier}`: {e}")
+            
+    try:
+        pyan.compute(['random_spikes', 'waveforms', 'templates', 'noise_levels'])
+        _ = pyan.compute('spike_amplitudes')
+        _ = pyan.compute('principal_components', n_components = 5, mode="by_channel_local")
+    except BaseException as e:
+        logger.error(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
+        raise RuntimeError(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
+    
+    phydir = config['job_evn']['base_directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[identifier] else 'phy')
+    try:
+        export_to_phy(
+            sorting_analyzer = pyan,
+            remove_if_exists = True,
+            output_folder    = phydir
+        )
+    except BaseException as e:
+        logger.error(f"Cannot export to phy: {e}")
+        raise RuntimeError(f"Cannot create and analyzer: {e}")        
+    carrier[identifier] = phydir
+    logger.info(f" > exported to {phydir}")
+    return carrier
+
+###>><<<
     # if 'report' in analyzeconf:
         # if type(analyzeconf['report']) is str:
             # reportdir = config['job_evn']['base_directory']+'/'+analyzeconf['report']
@@ -622,48 +780,5 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
             # logger.info(f' > report is exported to {reportdir}')
         # else:
             # logger.error(f"report is not a string - cannot export the report")
-
-def runphyexport(last,preproc_saved,sorting_saved):
-    logger = logging.getLogger(os.path.basename(last['running directory'])+"-runphyexport" )
-    if not 'phy' in last:
-        return 0
-    if 'envs' in last:
-        for ev in last['envs']:
-            os.environ[ev] = last['envs'][ev]
-            
-    import spikeinterface.full as si
-    from spikeinterface.exporters import export_to_phy
-    logger.info(f"EXPORTING PHY")
-    try:
-        pyan = si.create_sorting_analyzer(
-            recording=preproc_saved,
-            sorting=sorting_saved)
-    except BaseException as e:
-        logger.error(f"Cannot create and analyzer: {e}")
-        # raise RuntimeError(f"Cannot create and analyzer: {e}")
-        return 1
-            
-    try:
-        pyan.compute(['random_spikes', 'waveforms', 'templates', 'noise_levels'])
-        _ = pyan.compute('spike_amplitudes')
-        _ = pyan.compute('principal_components', n_components = 5, mode="by_channel_local")
-    except BaseException as e:
-        logger.error(f"Cannot preprocessed the sorting: {e}")
-        # raise RuntimeError(f"Cannot create and analyzer: {e}")
-        return 1
-
-    phydir = config['job_evn']['base_directory']+'/'+ ( last['phy']['folder'] if 'folder' in last['phy'] else 'phy')
-    try:
-        export_to_phy(
-            sorting_analyzer = pyan,
-            remove_if_exists = last['rerun'],
-            output_folder    = phydir
-        )
-    except BaseException as e:
-        logger.error(f"Cannot export to phy: {e}")
-        # raise RuntimeError(f"Cannot create and analyzer: {e}")
-        return 1
-    logger.info(f" > exported to {phydir}")
-    return 0
 
 ###<<<
