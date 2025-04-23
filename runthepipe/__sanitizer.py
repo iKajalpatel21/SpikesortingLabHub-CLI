@@ -32,7 +32,7 @@ STEP_DEPENDENCIES = {
     # Analyzer: the firs argument is a preprocessing, combined_recording, load_preprocessing OR recording, the second is sorting OR load_sorting
     "analyzer": [
         ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
-        ("sorting","load_sorting")
+        ("sorting","load_sorting","import_from_phy")
     ],
     # Load a previously done analyzer
     "load_analyzer": [],
@@ -42,19 +42,16 @@ STEP_DEPENDENCIES = {
         ("sorting","load_sorting")
     ],
     # Importing from phy needs: the only argument is a preprocessing, load_preprocessing, combined_recording OR recording
-    "import_from_phy" : [
-        ("recording", "combined_recording", "preprocessing", "load_preprocessing")
-    ],
+    "import_from_phy" : [ ],
     # Report requires: the first argument is a preprocessing, load_preprocessing, combined_recording OR recording, the second is sorting  OR load_sorting, the last is analyzer OR load_analyzer
     "report": [
-        ("recording", "combined_recording", "preprocessing", "load_preprocessing"),
-        ("sorting","load_sorting"),
-        ("analyzer","load_analyzer")
+          ("analyzer","load_analyzer")
     ],
     # Export to MatLab requires sorting OR load_sorting AND analyzer OR load_analyzer
     "export2matlab": [
-        ("sorting","load_sorting"),
-        ("analyzer","load_analyzer")
+        ("sorting","load_sorting","import_from_phy"),
+        ("analyzer","load_analyzer"),
+        ("phy_export","import_from_phy")
     ],
     # Upload whatever was done!
     "upload": [],
@@ -149,26 +146,30 @@ STEP_PARAMETERS = {
         "*folder"  : str
     },
     "phy_export"   : {
-        ">folder"  : str
+        ">folder"  : str,
+        ">do_not_update_config" : bool
     },
     "import_from_phy" : {
-        ">folder"  : str
+        "*phy_folder" : str,
+        ">folder"     : str
     },
     "report"       : {
         ">folder"  : str
     },
     "export2matlab": {
-        ">filename": str
+        ">filename": str,
+        ">marks"   : [ str ]
     },
     "upload"       : {
         "*destination"        : str,
         ">keep_base_directory": bool,
-        ">suffix"             : str
+        ">suffix"             : (str, bool)
     }
 }
     
-
-def job_sanity_check(config:dict)->(int,str):
+def base_check(config)->(int,str):
+    if not type(config) is dict:
+        return 'Configuration is not a directory'
     for required_job_item,item_type in [('version',str), ('job_id',str), ('job_evn',dict), ('job_steps',list)]:
         if not required_job_item in config:
             return f'There is no required item `{required_job_item}` in the job configuration'
@@ -177,7 +178,30 @@ def job_sanity_check(config:dict)->(int,str):
 
     if config['version'] != "0.4.1":
         return f'The configuration has a wrong version'
+    if 'log_level' in config['job_evn']:
+        if not type(config['job_evn']['log_level']) is str:
+            return 'The environment variable `log_level` has a wrong type {}, but should be a string'.format(type(config['job_evn']['log_level']))
+            
+        if not config['job_evn']['log_level'] in 'NOTSET DEBUG WARNING ERROR CRITICAL'.split():
+            return 'The environment variable `log_level` has a wrong value {}, but should be one of these: NOTSET DEBUG WARNING ERROR CRITICAL'.format(config['job_evn']['log_level'])
+            
+    
+    if "REDIRECT" in config['job_evn']:
+        if not type(config['job_evn']['REDIRECT']) is dict:
+            return 'The environment variable `REDIRECT` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['REDIRECT']))
+            
+        for rdr in config['job_evn']['REDIRECT']:
+            if not rdr in 'log out err'.split():
+                return f'Unknown REDIRECT entrance {rdr}. Can redirect only log, out or err streams'
+                
+            if not type(config['job_evn']['REDIRECT'][rdr]) is str:
+                return f'REDIRECT entrance {rdr} has a wrong type. It should be a string only'                
+    return 0
 
+def job_sanity_check(config:dict)->(int,str):
+    x = base_check(config)
+    if x != 0:
+        return x
     if len(config['job_id']) < 2:
         return f'job_id should be at least 2 characters long.'
 
@@ -188,26 +212,6 @@ def job_sanity_check(config:dict)->(int,str):
         if not type(config['job_evn'][required_job_env]) is item_type:
             return 'The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type)
             
-    #optional variables
-    # if 'log_level' in config['job_evn']:
-        # if not type(config['job_evn']['log_level']) is str:
-            # return 'The environment variable `log_level` has a wrong type {}, but should be a string'.format(type(config['job_evn']['log_level']))
-            # 
-        # if not config['job_evn']['log_level'] in 'NOTSET DEBUG WARNING ERROR CRITICAL'.split():
-            # return 'The environment variable `log_level` has a wrong value {}, but should be one of these: NOTSET DEBUG WARNING ERROR CRITICAL'.format(config['job_evn']['log_level']))
-            # 
-    
-    # if "REDIRECT" in config['job_evn']:
-        # if not type(config['job_evn']['REDIRECT']) is dict:
-            # return 'The environment variable `REDIRECT` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['REDIRECT']))
-            # 
-        # for rdr in config['job_evn']['REDIRECT']:
-            # if not rdr in 'log out err'.split():
-                # return f'Unknown REDIRECT entrance {rdr}. Can redirect only log, out or err streams'
-                # 
-            # if not type(config['job_evn']['REDIRECT'][rdr]) is str:
-                # return f'REDIRECT entrance {rdr} has a wrong type. It should be a string only'
-                # 
     if 'envs' in config['job_evn']:
         if not type(config['job_evn']['envs']) is dict:
             return 'The environment variable `envs` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['envs']))

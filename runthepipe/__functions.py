@@ -14,6 +14,9 @@ except:
 
 try:
     from .__sanitizer import STEP_PARAMETERS,step_sanity
+except:
+    from __sanitizer import STEP_PARAMETERS,step_sanity
+
 """
 These are main functions for both CLI until `runthepipe` and SpikesortingLabHub worker.
 In both cases a spikesorting job is a sequence of steps. Each step is a single function call.
@@ -231,7 +234,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     If there is `folder` key in configuration, this name will be used as folder name
     instead of identifier to store preprocessed data on disk.
     """
-    def resolvepreproc(si, cmd:str,rec,config:(dict,None)=None,logger):
+    def resolvepreproc(si, logger, cmd:str,rec,config:(dict,None)):
         """
         plugs requested preprocessing into the pipline
         returns the tail of pipeline
@@ -307,7 +310,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.info(f"PREPROC: {ppm}")
         config = preprocconf[ppm] if ppm in preprocconf else None
         try:
-            preproc.append( resolvepreproc(si, ppm, preproc[-1],config,logger) )
+            preproc.append( resolvepreproc(si,logger, ppm, preproc[-1],config) )
         except BaseException as e:
             logger.error(f'Cannot perform {ppm} in `{identifier}` section: {e}')
             raise RuntimeError(f'Cannot perform {ppm} in `{identifier}` section: {e}')
@@ -700,7 +703,7 @@ def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
 
 def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
-    Exports sorting into ph
+    Exports sorting into phy
     carrier is updated with phy directory name.
     Returns updated carrier dictionary
     """
@@ -759,26 +762,354 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
         logger.error(f"Cannot export to phy: {e}")
         raise RuntimeError(f"Cannot create and analyzer: {e}")        
     carrier[identifier] = phydir
-    logger.info(f" > exported to {phydir}")
+
+    
+    if 'do_not_update_config' in config[identifier] and config[identifier]['do_not_update_config']:
+        logger.warning(" > Skipping folder optimization ")
+        return carrier
+        
+    import hashlib
+    def checksum(filename, chunk_num_blocks=8192):
+        h = hashlib.md5()
+        with open(filename,'rb') as f: 
+            while chunk := f.read(chunk_num_blocks*h.block_size): 
+                h.update(chunk)
+        return h.hexdigest()
+
+    
+    logger.info(" > Computing Check Sums - please wait a bit, it may take quite a while")    
+    ppfile = config['job_evn']['base_directory']+'/'+ (config[dependencies[0]]['folder'] if 'folder' in config[dependencies[0]] else dependencies[0])+'/traces_cached_seg0.raw'
+    phfile = phydir+'/recording.dat'
+    phconf = phydir+'/params.py'
+    if not os.path.isfile(phfile): 
+        logger.error(f"phy exporting `{identifier}` can't optimized phy directory: `{phfile}` not found")
+        raise RuntimeError(f"phy exporting `{identifier}` can't optimized phy directory: `{phfile}` not found")
+        
+    if not os.path.isfile(phconf):
+        logger.error(f"phy exporting `{identifier}` can't optimized phy directory: `{phconf}` not found")
+        raise RuntimeError(f"phy exporting `{identifier}` can't optimized phy directory: `{phconf}` not found")
+        
+    pphash = checksum(ppfile) if os.path.isfile(ppfile) else ''
+    logger.info(f"    > {pphash}")
+    phhash = checksum(phfile)
+    logger.info(f"    > {phhash}")
+    phy_config = open(phconf).read()
+    if pphash == phhash:
+        logger.info(" > The both files are identical! Removing phy file")
+        os.remove(phfile)
+        phy_config = re.sub(r'dat_path .*\n',f'dat_path = "../'+(last['preprocessing']['folder'] if 'folder' in last['preprocessing'] else "preprocessed")+'/traces_cached_seg0.raw"\n',phy_config)
+    else:
+        logger.info(" > The files are different - leaving both")
+        phy_config = re.sub(r'dat_path .*\n',f'dat_path = "recording.dat"\n',phy_config)
+    logger.info(" > Updating PHY")
+    with open(phconf,'w') as fd:
+        fd.write(phy_config)
+    logger.info(f" > exported to {phydir} is finished")
     return carrier
 
-###>><<<
-    # if 'report' in analyzeconf:
-        # if type(analyzeconf['report']) is str:
-            # reportdir = config['job_evn']['base_directory']+'/'+analyzeconf['report']
-            # if last['rerun']:
-                # delosdir(reportdir)
-            # from spikeinterface.exporters import export_report
-            # try:
-                # export_report(
-                    # sorting_analyzer=analyzer, 
-                    # output_folder=reportdir
-                # )
-            # except BaseException as e:
-                # logger.error(f"Cannot export a report: {e}")
-                # raise RuntimeError(f"Cannot export a report: {e}")
-            # logger.info(f' > report is exported to {reportdir}')
-        # else:
-            # logger.error(f"report is not a string - cannot export the report")
+
+def import_from_phy(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Imports from phy directory
+        carrier is updated with new sorting object.
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'import_from_phy',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `import_from_phy`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `import_from_phy`: {x}')
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+    
+
+    logger.info(f"IMPORTING SORTING FROM PHY")
+   
+    sortingdir  = config['job_evn']['base_directory'] + '/' + (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
+    try:
+        sorting       = se.read_phy(config[identifier]['phy_folder'])
+        sorting_saved = sorting.save(
+            folder    = sortingdir,
+            overwrite = True)
+    except BaseException as e:
+        logger.error(f'Cannot import from phy: {e}')
+        raise RuntimeError(f'Cannot import from phy: {e}')
+
+    carrier[identifier] = sorting_saved
+    logger.info(f" > imported sorter from {phydir}")
+    return carrier
+
+def report(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Generated images and other statistical data out of analyzer
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+    
+    logger.info('SAVING REPORT')
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'report',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `report`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `report`: {x}')
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+        from spikeinterface.exporters import export_report
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+    
+    analyzer  = carrier[ dependencies[0] ]
+    reportdir = config['job_evn']['base_directory']+'/'++ (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
+    try:
+        export_report(
+            sorting_analyzer=analyzer, 
+            output_folder=reportdir
+        )
+    except BaseException as e:
+        logger.error(f"Cannot export a report: {e}")
+        raise RuntimeError(f"Cannot export a report: {e}")
+    carrier[identifier] = reportdir
+    logger.info(f' > report is exported to {reportdir}')
+    return carrier
+
+def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Exports h5 file for matlab analyses.
+        Updates carrier with h5 filename
+    Returns updated carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+    
+    logger.info('Exporting to MatLab')
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'export2matlab',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `export2matlab`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `export2matlab`: {x}')
+
+    if 'envs' in config['job_evn']:
+        if type(config['job_evn']['envs']) is dict:
+            for ev in config['job_evn']['envs']:
+                os.environ[ev] = config['job_evn']['envs'][ev]
+        else:
+            logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
+    try:
+        import spikeinterface.full as si
+    except:
+        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+
+    try:
+        import h5py
+        import csv
+    except:
+        logger.error(f'`h5py` must be installed to run matlab exporting')
+        raise RuntimeError(f'`h5py` must be installed to run matlab exporting')
+
+
+    sorting   = carrier[ dependencies[0] ]
+    analyzer  = carrier[ dependencies[1] ]
+    depfun    = __get_dep_step(dependencies[2])
+    
+    if    depfun == "phy_export":
+        phydir = config['job_evn']['base_directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[dependencies[2]] else 'phy')
+    elif  depfun == "import_from_phy":
+        phydir = config[ dependencies[2] ]['phy_folder']
+    else:
+        logger.error(f'The third dependence `{dependencies[2]}` is not phy_export or import_from_phy. In theory we should be here (-.-)')
+        raise RuntimeError(f'The third dependence `{dependencies[2]}` is not phy_export or import_from_phy. In theory we should be here (-.-)')
+
+    logger.info(f"Exporting to MatLab:")
+    phyids = []
+    phygrp = []
+    
+    if os.path.isfile(f'{phydir}/cluster_info.tsv'):
+        with open(f'{phydir}/cluster_info.tsv') as fd:
+            reader = csv.DictReader(fd, delimiter="\t")
+            for r in reader:
+                phyids.append(r['id'])
+                phygrp.append(r['group'])
+
+        phyids = array([ int(x) for x in phyids])
+
+    spikes = sorting.to_spike_vector()
+    if isinstance(spikes, ndarray):
+        spikes = array([
+            [x,y]
+            for x,y,z in spikes ],dtype=int)
+    tpl = analyzer.get_extension("templates")
+    spa = analyzer.get_extension("spike_amplitudes").get_data()
+    spl = analyzer.get_extension("spike_locations").get_data()
+    spl = array([ [x,y] for x,y in zip(spl['x'],spl['y']) ]) 
+    unl = analyzer.get_extension("unit_locations").get_data()
+    ewf = analyzer.get_extension("waveforms")
+  
+    unit_ids = sorting.unit_ids
+    used_sparsity = analyzer.sparsity
+    sparse_dict   = used_sparsity.unit_id_to_channel_indices
+    max_num_channels = max(len(chan_inds) for chan_inds in sparse_dict.values())
+    dense_templates = tpl.get_templates(unit_ids=unit_ids, operator="average")
+    num_samples = dense_templates.shape[1]
+    templates = zeros((len(unit_ids), num_samples, max_num_channels), dtype="float64")
+    templates_ind = -ones((len(unit_ids), max_num_channels), dtype="int64")
+    for unit_ind, unit_id in enumerate(unit_ids):
+        chan_inds = sparse_dict[unit_id]
+        template = dense_templates[unit_ind][:, chan_inds]
+        templates[unit_ind, :, :][:, : len(chan_inds)] = template
+        templates_ind[unit_ind, : len(chan_inds)] = chan_inds
+            
+    u_sample_shapes = array([ ewf.get_waveforms_one_unit(unit_id).shape for unit_id in unit_ids ],dtype=int)
+
+    max_u_samples  = amax(u_sample_shapes[:,0])
+    max_u_channels = amax(u_sample_shapes[:,2])
+    if unique(u_sample_shapes[:,1]).shape[0] != 1:
+        logger.error("There are different shapes in column 1 of samples")
+        for u in u_sample_shapes:
+            logger.error(f' > {u}')
+        raise RuntimeError(f"There are different shapes in column 1 of samples")
+    usw = zeros((unit_ids.shape[0],max_u_samples,u_sample_shapes[0,1],max_u_channels))
+
+
+    usw_d = []
+    for unit_ind, unit_id in enumerate(unit_ids):
+        wfs = ewf.get_waveforms_one_unit(unit_id)
+        usw[unit_ind,:wfs.shape[0],:,:wfs.shape[2]] = wfs
+        usw_d.append( list(wfs.shape) )
+
+    actchids = [ i for i in range(last["recording"]["number of channels"]) ]
+    for b in last["recording"]["remove"]+last["recording"]["bad_channels"]:
+        if b in actchids: actchids.remove(b)
+    actchids = array(actchids+[-1],dtype=int)
+    templates_indx = copy(templates_ind)
+    templates_ind = array([
+        actchids[x] for x in templates_indx
+    ])
+    unit_channel_corrected = True
+    
+    
+    
+    if 'marks' in config[identifier] :
+        marks = config[identifier]['marks']
+    else:
+        marks = 'good mua noise unsorted undecided'.split()
+
+    outfile = config['job_evn']['base_directory']+'/'+ (config[identifier]['filename'] if 'filename' in config[identifier] else 'spikesorting-export.h5')
+    with h5py.File(f'{outfile}', 'w') as hd:
+        hd.create_dataset('spikes_time'           , data=spikes[:,0]/sorting._sampling_frequency )
+        hd.create_dataset('spikes_unit'           , data=spikes[:,1] )
+        hd.create_dataset('spike_amplitudes'      , data=spa )
+        hd.create_dataset('spike_locations'       , data=spl )
+        hd.create_dataset('unit_location'         , data=unl)
+        hd.create_dataset('unit_waveform'         , data=templates)
+        hd.create_dataset('unit_channels'         , data=templates_ind)
+        hd.create_dataset('unit_channel_corrected', data=unit_channel_corrected)
+        hd.create_dataset('unit_samples_waveform' , data=usw)
+        hd.create_dataset('unit_samples_sizes'    , data=array(usw_d))
+        hd.create_dataset('phy_ids'               , data=phyids)
+        hd.create_dataset('unit_label'            , data=[ marks.index(x) if x in marks else -1 for x in phygrp] if len(phygrp) != 0 else phygrp)
+        hd.create_dataset('phy_channel_position'  , data=chpos )
+    carrier[identifier] = outfile
+    logger.info(f' > Exported sorting into MatLab file {outfile}')
+    return carrier
+
+
+def upload(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict): 
+    """
+    Uploads current work directory to the cloud
+    Returns unchanged carrier dictionary
+    """
+
+    logger = logging.getLogger( config['job_id'] + identifier )
+    
+    logger.info('Uploading Results')
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError('Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'upload',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration `{identifier}` for `upload`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `upload`: {x}')
+
+    import hashlib, time, re, os
+    from numpy.random import randint
+    
+    uploadconfig = config[identifier]
+
+    cpy = uploadconfig["keep_base_directory"] if "keep_base_directory" in uploadconfig else False
+    suf = uploadconfig["suffix"]              if "suffix"              in uploadconfig else False
+    if type(suf) is bool:
+        suf = f'{randint(0xffff):04d}' if suf else ''
+    
+    source      = config['job_evn']['base_directory']
+    destination = uploadconfig['destination']+suf
+    logger.info(' > Copying' if cpy else ' > Moving')
+    logger.info(f'    > source      = {source}')
+    logger.info(f'    > destination = {destination}')
+    if cpy:
+        logger.info( '    > Copying .... wait ' )
+        shutil.copytree(source, destination)
+    else:
+        logger.info( '    > Moving  .... wait ' )
+        shutil.move(source, destination)
+    logger.info( ' > DONE ' )
+    logger.info('----------------------------')
+    return carrier
+
+
+###>>> Import recording from phy?
+    # chpos = load(last['running directory']+'/phy/channel_positions.npy')
+
+    # if os.path.isdir(prepdir) :
+        # recording_saved = si.load_extractor(prepdir)
+    # else:
+        # probe = Probe(ndim=2, si_units='um')
+        # probe.set_contacts(positions=chpos, shapes='square', shape_params={'width':11,'height':11})
+        # probe.set_device_channel_indices(arange(chpos.shape[0]))
+
+        # recording = si.BinaryRecordingExtractor(
+            # last['running directory']+'/phy/temp_wh.dat',sorting._sampling_frequency,'int16', num_channels=chpos.shape[0],
+            # gain_to_uV =  0.1949999928474426, offset_to_uV = 0.0)
+        # recording.set_probe(probe,in_place=True)
+        # recording.annotate(is_filtered=True)
+        # recording_saved = recording.save( folder = prepdir, chunk_duration = '30s')
+    # last['analyzer-before-phy-curation'] = pycopy.deepcopy(last['analyzer'])
+    # last['sorter-before-phy-curation'  ] = pycopy.deepcopy(last['sorter'  ])
+    # last['sorter'] = { 'name' : 'phy-curation', 'phy-curation' : {} }
+    # if 'folder' in last['sorter-before-phy-curation'  ]:
+        # last['sorter']['folder'] = last['sorter-before-phy-curation'  ]['folder']
+    # return last,recording_saved,sorting
 
 ###<<<
