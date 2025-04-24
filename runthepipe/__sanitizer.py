@@ -166,37 +166,30 @@ STEP_PARAMETERS = {
         ">suffix"             : (str, bool)
     }
 }
+
+JOB_CONFIG = {
+    "*version" : "0.4.1",
+    "*si"      : "0.101.0",
+    "*job_id"  : str,
+    "*job_evn" : {
+        "*base directory": str,
+        "*job_kwarg"     : dict,
+        ">log_level"     : str,
+        ">REDIRECT" : {
+            ">log": str,
+            ">out": str,
+            ">err": str
+        },
+        ">envs" : dict
+    },
+    "*job_steps" : [ {"*function":str, "*identifier":str, "*depends":[str] } ],
+    "++" : dict
+}
     
 def base_check(config)->(int,str):
     if not type(config) is dict:
-        return 'Configuration is not a directory'
-    for required_job_item,item_type in [('version',str), ('job_id',str), ('job_evn',dict), ('job_steps',list)]:
-        if not required_job_item in config:
-            return f'There is no required item `{required_job_item}` in the job configuration'
-        if not type(config[required_job_item]) is item_type:
-            return f'Configuration item `{required_job_item}` has a wrong type {type(config[required_job_item])}, but should be {item_type}'
-
-    if config['version'] != "0.4.1":
-        return f'The configuration has a wrong version'
-    if 'log_level' in config['job_evn']:
-        if not type(config['job_evn']['log_level']) is str:
-            return 'The environment variable `log_level` has a wrong type {}, but should be a string'.format(type(config['job_evn']['log_level']))
-            
-        if not config['job_evn']['log_level'] in 'NOTSET DEBUG WARNING ERROR CRITICAL'.split():
-            return 'The environment variable `log_level` has a wrong value {}, but should be one of these: NOTSET DEBUG WARNING ERROR CRITICAL'.format(config['job_evn']['log_level'])
-            
-    
-    if "REDIRECT" in config['job_evn']:
-        if not type(config['job_evn']['REDIRECT']) is dict:
-            return 'The environment variable `REDIRECT` has a wrong type {}, but should be a dictionary'.format(type(config['job_evn']['REDIRECT']))
-            
-        for rdr in config['job_evn']['REDIRECT']:
-            if not rdr in 'log out err'.split():
-                return f'Unknown REDIRECT entrance {rdr}. Can redirect only log, out or err streams'
-                
-            if not type(config['job_evn']['REDIRECT'][rdr]) is str:
-                return f'REDIRECT entrance {rdr} has a wrong type. It should be a string only'                
-    return 0
+        return 'Configuration is not a dictionary'
+    return check_schema_an_enry(config,JOB_CONFIG)
 
 def job_sanity_check(config:dict)->(int,str):
     x = base_check(config)
@@ -205,12 +198,6 @@ def job_sanity_check(config:dict)->(int,str):
     if len(config['job_id']) < 2:
         return f'job_id should be at least 2 characters long.'
 
-    for required_job_env,item_type in [("base directory",str),("job_kwarg",dict)]:
-        if not required_job_env in config['job_evn']:
-            return f'The required job environment `{required_job_env}` is not set'
-            
-        if not type(config['job_evn'][required_job_env]) is item_type:
-            return 'The environment variable `{}` has a wrong type {}, but should be {}'.format(required_job_env,type(config['job_evn'][required_job_env]),item_type)
             
     if 'envs' in config['job_evn']:
         if not type(config['job_evn']['envs']) is dict:
@@ -242,7 +229,7 @@ def job_steps_sanity(config:dict)->(int,str):
                 return f'required step key `{required_step_item}` in the step #{sid+1} has an incorrect type {type(s[required_step_item])} but should be {item_type}'
                 
         for itm in s:
-            if not itm in  'function identifier depends'.split():
+            if not itm in 'function identifier depends'.split():
                 return f'Unknown entrance {itm} in step #{sid+1}'
                 
         if not s['function'] in STEP_DEPENDENCIES:

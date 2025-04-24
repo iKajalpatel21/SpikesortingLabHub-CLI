@@ -67,8 +67,8 @@ def check_schema_an_enry(entry,sch)->(int,str):
             x = check_schema_an_enry(entry[n],sch['>'+n])
             if x != 0:
                 return f'dictionary entry {n} returns error: {x}'
-        for n in entry:
-            if not n in allnames:
+        for n in entry :
+            if not n in allnames and not '+' in allnames:
                 return f'unknown entry `{n}` for a dictionary'
         return 0
     else:
