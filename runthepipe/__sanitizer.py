@@ -173,7 +173,12 @@ JOB_CONFIG = {
     "*job_id"  : str,
     "*job_evn" : {
         "*base directory": str,
-        "*job_kwarg"     : dict,
+        "*job_kwargs"    : {
+            ">n_jobs"        : int ,
+            ">total_memory"  : str,
+            ">chunk_duration": str,
+            ">progress_bar"  : bool
+        },
         ">log_level"     : str,
         ">REDIRECT" : {
             ">log": str,

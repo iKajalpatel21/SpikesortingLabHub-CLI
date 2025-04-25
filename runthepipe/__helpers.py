@@ -12,6 +12,13 @@ def __get_dep_step(config:dict, idf:str):
             return s['function']
     raise RuntimeError(f'cannot find `{idf}` in job_steps')
 
+def set_si_kwargs(si, config:dict)->dict:
+    gkwargs = si.get_global_job_kwargs()
+    lkwargs = config['job_evn']['job_kwargs']
+    for x in gkwargs:
+        if not x in lkwargs:
+            lkwargs[x] = gkwargs[x]
+    return lkwargs
 def check_schema_an_enry(entry,sch)->(int,str):
     """
     Recursively checks if an `entry` is consistent with the schema `sch`

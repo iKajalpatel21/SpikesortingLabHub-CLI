@@ -13,9 +13,9 @@ except:
     from __helpers import *
 
 try:
-    from .__sanitizer import STEP_PARAMETERS,step_sanity
+    from .__sanitizer import STEP_PARAMETERS,step_sanity,sanitize_preprocessing,sanitize_sorting,sanitize_analyzer
 except:
-    from __sanitizer import STEP_PARAMETERS,step_sanity
+    from __sanitizer import STEP_PARAMETERS,step_sanity,sanitize_preprocessing,sanitize_sorting,sanitize_analyzer
 
 """
 These are main functions for both CLI until `runthepipe` and SpikesortingLabHub worker.
@@ -50,7 +50,7 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
     Combines several binary files in a one and creates a recording, then sets probe configuration, used channels, and bad channels.
     
     """
-    logger = logging.getLogger( config['job_id']+identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
 
     if not identifier in config:
@@ -63,7 +63,7 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
         raise RuntimeError(f'There is inconsistencies in the configuration for `combined_recording`: {x}')
 
     recconf = config[identifier]
-        
+
     if 'envs' in config['job_evn']:
         if type(config['job_evn']['envs']) is dict:
             for ev in config['job_evn']['envs']:
@@ -74,10 +74,23 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
     try:
         import spikeinterface.full as si
         from probeinterface import read_probeinterface
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
-    
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
+
+    try:
+        si.set_global_job_kwargs(**set_si_kwargs(config))
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
+        
+
     buffersize = 4096
     try:
         with open(recconf['combined file'],'wb') as outfd:
@@ -146,7 +159,7 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     Reads a recording, sets probe configuration, used channels, and bad channels.
     
     """
-    logger = logging.getLogger( config['job_id']+identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -171,9 +184,16 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
     try:
         import spikeinterface.full as si
         from probeinterface import read_probeinterface
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
+
     if   'binfile' in recconf:
         rec_scales = {}
         if 'gain_to_uV' in recconf:
@@ -261,7 +281,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             logger.error(f'Unnknown perprocessing option{cmd}')
             raise RuntimeError(f'Unnknown perprocessing option{cmd}')
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -272,7 +292,7 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
         raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
 
-    x = sanitize_sorting(config, identifier)
+    x = sanitize_preprocessing(config, identifier)
     if x != 0:
         logger.error(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
         raise RuntimeError(f'There is inconsistencies in the configuration `{identifier}` for `preprocessing`: {x}')
@@ -287,9 +307,15 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
     
         
     # if last['rerun']:
@@ -307,25 +333,26 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     
     preproc = [ carrier[ dependencies[0] ] ]
     for ppm in preprocconf['methods']:
-        logger.info(f"PREPROC: {ppm}")
-        config = preprocconf[ppm] if ppm in preprocconf else None
+        logger.info(f" > PREPROCs: {ppm}")
+        pp_config = preprocconf[ppm] if ppm in preprocconf else None
         try:
-            preproc.append( resolvepreproc(si,logger, ppm, preproc[-1],config) )
+            preproc.append( resolvepreproc(si,logger, ppm, preproc[-1],pp_config) )
         except BaseException as e:
             logger.error(f'Cannot perform {ppm} in `{identifier}` section: {e}')
             raise RuntimeError(f'Cannot perform {ppm} in `{identifier}` section: {e}')
 
     preproc[-1].annotate(is_filtered=True)
+
     preproc_saved = preproc[-1].save(
-        folder = config['job_evn']['base_directory']+'/'+(preprocconf['folder'] if 'folder' in preprocconf else identifier), 
+        folder = config['job_evn']['base directory']+'/'+(preprocconf['folder'] if 'folder' in preprocconf else identifier), 
         chunk_duration = si.get_global_job_kwargs()['chunk_duration']
         )
     carrier[identifier] = preproc_saved
-    logger.info(f'Preprocessing `{identifier}` is done')
+    logger.info(f' > Preprocessing `{identifier}` is done')
     return carrier
 
 def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -344,9 +371,15 @@ def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carr
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
     
     preprocdir = config[identifier]['folder']
     try:
@@ -355,7 +388,7 @@ def load_preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carr
         logger.error(f'Cannot read preprocessing from the folder {preprocdir}: {e}')
         raise RuntimeError(f'Cannot read preprocessing from the folder {preprocdir}: {e}')
     carrier[identifier] = preproc
-    logger.info(f'Preprocessing `{identifier}` was loaded from the directory {preprocdir}')
+    logger.info(f' > Preprocessing `{identifier}` was loaded from the directory {preprocdir}')
     return carrier
     
 def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
@@ -365,7 +398,7 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -395,9 +428,15 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
 
 
@@ -453,7 +492,7 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     #DB>>
     logger.debug(f" > configuration = {json.dumps(sortconf,indent=4)}")
     #<<DB
-    srdir = config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir"
+    srdir = config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir"
     logger.info(f"SORTING: "+sortconf['name'])
     if 'image' in sortconf:
         logger.info(f' > Container : '+sortconf['image'])
@@ -467,10 +506,10 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                     singularity_image = conimage,
                     **sortconf['parameters'] )
             except BaseException as e:
-                if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
+                if os.path.isfile(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                     shutil.copy(
-                        getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
-                        getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
+                        getospath(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                     )
                 logger.error(f"Sorting failed: {e}")
                 raise RuntimeError(f"Sorting failed: {e}")
@@ -485,10 +524,10 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                     docker_image=f"spikeinterface/{dockerpath}",
                     **sortconf['parameters'] )
             except BaseException as e:
-                if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
+                if os.path.isfile(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                     shutil.copy(
-                        getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
-                        getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
+                        getospath(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                        getospath(config['job_evn']['base directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                     )
                 logger.error(f"Sorting failed: {e}")
                 raise RuntimeError(f"Sorting failed: {e}")
@@ -503,15 +542,15 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                 folder=srdir,
                 **sortconf['parameters'] )
         except BaseException as e:
-            if os.path.isfile(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
+            if os.path.isfile(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"):
                 shutil.copy(
-                    getospath(config['job_evn']['base_directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
-                    getospath(config['job_evn']['base_directory']+f"/{identifier}-spikeinterface_sorter_log.json")
+                    getospath(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
+                    getospath(config['job_evn']['base directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                 )
             logger.error(f"Sorting failed: {e}")
             raise RuntimeError(f"Sorting failed: {e}")
 
-    sorting_saved = sorting.save(folder=config['job_evn']['base_directory']+'/'+(sortconf['folder'] if 'folder' in sortconf else identifier))
+    sorting_saved = sorting.save(folder=config['job_evn']['base directory']+'/'+(sortconf['folder'] if 'folder' in sortconf else identifier))
     carrier[identifier] = sorting_saved
     logger.info(f"Sorting saved")
 
@@ -527,7 +566,7 @@ def load_sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:di
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -546,9 +585,16 @@ def load_sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:di
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
+
     sortdir = config[identifier]['folder']
     try:
         sorting = si.load_extractor(sortdir)
@@ -567,7 +613,7 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -594,9 +640,15 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
     logger.info(f"ANALYZER:")    
     subfolder = analyzeconf['folder'] if 'folder' in analyzeconf else identifier
@@ -607,7 +659,7 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         analyzer = si.create_sorting_analyzer(
             recording=recording,
             sorting=sorting,
-            folder=config['job_evn']['base_directory']+f'/{subfolder}',
+            folder=config['job_evn']['base directory']+f'/{subfolder}',
             format="binary_folder",
             overwrite=True
             )
@@ -668,7 +720,7 @@ def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -687,9 +739,15 @@ def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
     analyzerdir = config[identifier]['folder']
     try:
@@ -708,7 +766,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -727,9 +785,15 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
     preproc = carrier[ dependencies[0] ]
     sorting = carrier[ dependencies[1] ]
@@ -751,7 +815,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
         logger.error(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
         raise RuntimeError(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
     
-    phydir = config['job_evn']['base_directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[identifier] else 'phy')
+    phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[identifier] else 'phy')
     try:
         export_to_phy(
             sorting_analyzer = pyan,
@@ -778,7 +842,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
 
     
     logger.info(" > Computing Check Sums - please wait a bit, it may take quite a while")    
-    ppfile = config['job_evn']['base_directory']+'/'+ (config[dependencies[0]]['folder'] if 'folder' in config[dependencies[0]] else dependencies[0])+'/traces_cached_seg0.raw'
+    ppfile = config['job_evn']['base directory']+'/'+ (config[dependencies[0]]['folder'] if 'folder' in config[dependencies[0]] else dependencies[0])+'/traces_cached_seg0.raw'
     phfile = phydir+'/recording.dat'
     phconf = phydir+'/params.py'
     if not os.path.isfile(phfile): 
@@ -815,7 +879,7 @@ def import_from_phy(config:dict,identifier:str,dependencies:(list,tuple),carrier
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
 
     if not identifier in config:
         logger.error(f'Cannot find `{identifier}` in the configuration')
@@ -834,14 +898,20 @@ def import_from_phy(config:dict,identifier:str,dependencies:(list,tuple),carrier
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
     
 
     logger.info(f"IMPORTING SORTING FROM PHY")
    
-    sortingdir  = config['job_evn']['base_directory'] + '/' + (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
+    sortingdir  = config['job_evn']['base directory'] + '/' + (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
     try:
         sorting       = se.read_phy(config[identifier]['phy_folder'])
         sorting_saved = sorting.save(
@@ -861,7 +931,7 @@ def report(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
     
     logger.info('SAVING REPORT')
     if not identifier in config:
@@ -882,12 +952,18 @@ def report(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     try:
         import spikeinterface.full as si
         from spikeinterface.exporters import export_report
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
     
     analyzer  = carrier[ dependencies[0] ]
-    reportdir = config['job_evn']['base_directory']+'/'++ (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
+    reportdir = config['job_evn']['base directory']+'/'+ (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
     try:
         export_report(
             sorting_analyzer=analyzer, 
@@ -907,7 +983,7 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     Returns updated carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
     
     logger.info('Exporting to MatLab')
     if not identifier in config:
@@ -927,9 +1003,15 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
-    except:
-        logger.error(f'`spikeinterfce[full]` must be installed to run sorting steps')
-        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run sorting steps')
+        si.set_global_job_kwargs(
+            **set_si_kwargs(si,config)
+        )
+    except ImportError:
+        logger.error(f'`spikeinterfce[full]` must be installed to run job steps')
+        raise RuntimeError(f'`spikeinterfce[full]` must be installed to run job steps')
+    except BaseException as e:
+        logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
+        raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
     try:
         import h5py
@@ -944,7 +1026,7 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     depfun    = __get_dep_step(dependencies[2])
     
     if    depfun == "phy_export":
-        phydir = config['job_evn']['base_directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[dependencies[2]] else 'phy')
+        phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[dependencies[2]] else 'phy')
     elif  depfun == "import_from_phy":
         phydir = config[ dependencies[2] ]['phy_folder']
     else:
@@ -1025,7 +1107,7 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     else:
         marks = 'good mua noise unsorted undecided'.split()
 
-    outfile = config['job_evn']['base_directory']+'/'+ (config[identifier]['filename'] if 'filename' in config[identifier] else 'spikesorting-export.h5')
+    outfile = config['job_evn']['base directory']+'/'+ (config[identifier]['filename'] if 'filename' in config[identifier] else 'spikesorting-export.h5')
     with h5py.File(f'{outfile}', 'w') as hd:
         hd.create_dataset('spikes_time'           , data=spikes[:,0]/sorting._sampling_frequency )
         hd.create_dataset('spikes_unit'           , data=spikes[:,1] )
@@ -1051,7 +1133,7 @@ def upload(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     Returns unchanged carrier dictionary
     """
 
-    logger = logging.getLogger( config['job_id'] + identifier )
+    logger = logging.getLogger( config['job_id']+':'+identifier )
     
     logger.info('Uploading Results')
     if not identifier in config:
@@ -1068,12 +1150,12 @@ def upload(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     
     uploadconfig = config[identifier]
 
-    cpy = uploadconfig["keep_base_directory"] if "keep_base_directory" in uploadconfig else False
+    cpy = uploadconfig["keep_base directory"] if "keep_base directory" in uploadconfig else False
     suf = uploadconfig["suffix"]              if "suffix"              in uploadconfig else False
     if type(suf) is bool:
         suf = f'{randint(0xffff):04d}' if suf else ''
     
-    source      = config['job_evn']['base_directory']
+    source      = config['job_evn']['base directory']
     destination = uploadconfig['destination']+suf
     logger.info(' > Copying' if cpy else ' > Moving')
     logger.info(f'    > source      = {source}')
