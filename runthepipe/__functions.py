@@ -317,20 +317,6 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
         raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
     
-        
-    # if last['rerun']:
-        # delosdir('{running directory}/{folder}'.format(folder=(preprocconf['folder'] if 'folder' in preprocconf else "preprocessed"),**last))
-
-    # if not   'methods' in preprocconf:
-        # logger.error(f'There is not a `methods` section in `{identifier}` section')
-        # raise RuntimeError(f'There is not a `methods` section in `{identifier}` section')
-    # if not type(preprocconf['methods']) is list:
-        # logger.error(f'The `methods` section in `{identifier}` section is not a list')
-        # raise RuntimeError(f'The `methods` section in `{identifier}` section is not a list')
-    # if len(dependencies) != 1:
-        # logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
-        # raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
-    
     preproc = [ carrier[ dependencies[0] ] ]
     for ppm in preprocconf['methods']:
         logger.info(f" > PREPROCs: {ppm}")
@@ -345,7 +331,8 @@ def preprocessing(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
 
     preproc_saved = preproc[-1].save(
         folder = config['job_evn']['base directory']+'/'+(preprocconf['folder'] if 'folder' in preprocconf else identifier), 
-        chunk_duration = si.get_global_job_kwargs()['chunk_duration']
+        chunk_duration = si.get_global_job_kwargs()['chunk_duration'],
+        overwrite=True
         )
     carrier[identifier] = preproc_saved
     logger.info(f' > Preprocessing `{identifier}` is done')
@@ -437,19 +424,6 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     except BaseException as e:
         logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
         raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
-
-
-
-    # if last['rerun']:
-        # delosdir('{running directory}/sorting-workingdir'.format(**last))
-        # delosdir('{running directory}/sorting-saved'.format(**last))
-
-    # if not 'name' in sortconf:
-        # logger.error(f'cannot find `name` in the sorting configuration {identifier}')
-        # raise RuntimeError(f'cannot find `name` in the sorting configuration {identifier}')
-    # if len(dependencies) != 1:
-        # logger.error(f'dependencies must have only one identifier but got {len(dependencies)}')
-        # raise RuntimeError(f'dependencies must have only one identifier but got {len(dependencies)}')
     
     preproc = carrier[ dependencies[0] ]
         
@@ -458,7 +432,8 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         sortconf['parameters'] = {}
         logger.warning("Cannot find sorter parameters - use default!")
 
-    if 'job_kwargs' in config['job_evn']:
+    default_parameters = si.get_default_sorter_params( sortconf['name'] )
+    if 'job_kwargs' in config['job_evn'] and 'job_kwargs' in default_parameters:
         sortconf['parameters']["job_kwargs"] = config['job_evn']['job_kwargs']
     else:
         def setadict(d:dict,prm:str,val):
@@ -490,12 +465,18 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                     sudict[n]
                 )
     #DB>>
-    logger.debug(f" > configuration = {json.dumps(sortconf,indent=4)}")
+    logger.debug(f"    > configuration = {json.dumps(sortconf,indent=4)}")
     #<<DB
     srdir = config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir"
-    logger.info(f"SORTING: "+sortconf['name'])
+    if os.path.isdir(srdir): delosdir(srdir)
+    svdir = config['job_evn']['base directory']+'/'+(sortconf['folder'] if 'folder' in sortconf else identifier)
+    
+    logger.info(f" > SORTING: "+sortconf['name'])
+    logger.info(f"    > working directory     = {srdir}")
+    logger.info(f"    > destination directory = {svdir}")
+    
     if 'image' in sortconf:
-        logger.info(f' > Container : '+sortconf['image'])
+        logger.info(f'    > Container : '+sortconf['image'])
         conimage = sortconf['image']
         if sys.platform == 'linux':
             try:
@@ -529,10 +510,10 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                         getospath(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
                         getospath(config['job_evn']['base directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                     )
-                logger.error(f"Sorting failed: {e}")
+                logger.error(f"    > Sorting failed: {e}")
                 raise RuntimeError(f"Sorting failed: {e}")
         else:
-            logger.error(f"Sorting failed: unknow platform")
+            logger.error(f"    > Sorting failed: unknow platform")
             raise RuntimeError(f"Sorting failed: unknow platform")
     else:
         try:
@@ -547,12 +528,12 @@ def sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                     getospath(config['job_evn']['base directory']+f"/{identifier}-sorting-workingdir/spikeinterface_log.json"),
                     getospath(config['job_evn']['base directory']+f"/{identifier}-spikeinterface_sorter_log.json")
                 )
-            logger.error(f"Sorting failed: {e}")
+            logger.error(f"    > Sorting failed: {e}")
             raise RuntimeError(f"Sorting failed: {e}")
 
-    sorting_saved = sorting.save(folder=config['job_evn']['base directory']+'/'+(sortconf['folder'] if 'folder' in sortconf else identifier))
+    sorting_saved = sorting.save(folder=svdir,overwrite=True)
     carrier[identifier] = sorting_saved
-    logger.info(f"Sorting saved")
+    logger.info(f"    > Sorting saved")
 
     # if "save working dir" in last and type(last["save working dir"]) is bool and last["save working dir"]:
         # return carrier    
@@ -602,7 +583,7 @@ def load_sorting(config:dict,identifier:str,dependencies:(list,tuple),carrier:di
         logger.error(f'Cannot read sorting from the folder {sortdir}: {e}')
         raise RuntimeError(f'Cannot read sorting from the folder {sortdir}: {e}')
     carrier[identifier] = sorting
-    logger.info(f'sorting `{identifier}` was loaded from the directory {sortdir}')
+    logger.info(f'    > sorting `{identifier}` was loaded from the directory {sortdir}')
     return carrier
         
     
@@ -696,22 +677,21 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
                     l = [x]+l
         return l
 
-    logger.debug(f' > putting metrics in right order')
+    logger.debug(f'    > putting metrics in right order')
     #logger.debug(f'   > '+ analyzeconf['metrics'])
     metrics = [ mm for mm in analyzeconf['metrics'] ]
-    logger.debug(f' > Metrics before sotring {metrics}')
-    logger.info(f' > Processing metrics: {metrics}')
+    logger.debug(f'    > Metrics before sotring {metrics}')
+    logger.info(f'    > Processing metrics: {metrics}')
     for mm in analyzeconf['metrics']:
         if not mm in si.get_available_analyzer_extensions():
             logger.error(f"An requested metric {mm} is not valid metric. Valid metric are {si.get_available_analyzer_extensions()}")
             raise RuntimeError(f"An requested metric {mm} is not valid metric. Valid metric are {si.get_available_analyzer_extensions()}")
         metrics = move_at_front(metrics, mm)
-    logger.debug(f' > Computing metrics: {metrics}')
+    logger.debug(f'    > Computing metrics: {metrics}')
     analyzer.compute(input=metrics, extension_params=analyzeconf['metrics'])
-    logger.info(f' > Analysise of {metrics} complite!')
+    logger.info(f'    > Analysise of {metrics} complite!')
     carrier[identifier] = analyzer
-    logger.info(f"Sorting saved")
-    logger.info(f' > Analysise is finished')
+    logger.info(f'    > Analysise is finished')
     return carrier
 
 def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
@@ -756,7 +736,7 @@ def load_analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         logger.error(f'Cannot laod  analyzer from the folder {analyzerdir}: {e}')
         raise RuntimeError(f'Cannot laod analyzer from the folder {analyzerdir}: {e}')
     carrier[identifier] = analyzer
-    logger.info(f'analyzer `{identifier}` was loaded from the directory {analyzerdir}')
+    logger.info(f'    > analyzer `{identifier}` was loaded from the directory {analyzerdir}')
     return carrier
 
 def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
@@ -785,6 +765,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
+        from spikeinterface.exporters import export_to_phy
         si.set_global_job_kwargs(
             **set_si_kwargs(si,config)
         )
@@ -799,6 +780,8 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
     sorting = carrier[ dependencies[1] ]
 
     logger.info(f"EXPORTING PHY")
+    phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[identifier] else 'phy')
+    logger.info(f" > phy directory = {phydir}")
     try:
         pyan = si.create_sorting_analyzer(
             recording=preproc,
@@ -815,7 +798,6 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
         logger.error(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
         raise RuntimeError(f"Cannot analyzer sorting for phy exporting `{identifier}`: {e}")
     
-    phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[identifier] else 'phy')
     try:
         export_to_phy(
             sorting_analyzer = pyan,
@@ -824,7 +806,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
         )
     except BaseException as e:
         logger.error(f"Cannot export to phy: {e}")
-        raise RuntimeError(f"Cannot create and analyzer: {e}")        
+        raise RuntimeError(f"Cannot export to phy: {e}")        
     carrier[identifier] = phydir
 
     
@@ -832,7 +814,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
         logger.warning(" > Skipping folder optimization ")
         return carrier
         
-    import hashlib
+    import hashlib, re
     def checksum(filename, chunk_num_blocks=8192):
         h = hashlib.md5()
         with open(filename,'rb') as f: 
@@ -898,6 +880,7 @@ def import_from_phy(config:dict,identifier:str,dependencies:(list,tuple),carrier
             logger.warning('Cannot set environment variables: job_evn/envs is not a dictionary')
     try:
         import spikeinterface.full as si
+        import spikeinterface.extractors as se
         si.set_global_job_kwargs(
             **set_si_kwargs(si,config)
         )
@@ -912,8 +895,9 @@ def import_from_phy(config:dict,identifier:str,dependencies:(list,tuple),carrier
     logger.info(f"IMPORTING SORTING FROM PHY")
    
     sortingdir  = config['job_evn']['base directory'] + '/' + (config[identifier]['folder'] if 'folder' in config[identifier] else identifier)
+    phydir      = config[identifier]['phy_folder']
     try:
-        sorting       = se.read_phy(config[identifier]['phy_folder'])
+        sorting       = se.read_phy(phydir)
         sorting_saved = sorting.save(
             folder    = sortingdir,
             overwrite = True)
@@ -1157,6 +1141,14 @@ def upload(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     
     source      = config['job_evn']['base directory']
     destination = uploadconfig['destination']+suf
+    try:
+        os.makedirs(
+            os.path.dirname(destination), 
+            exist_ok=True
+        )
+    except BaseException as e:
+        return f'Cannot create destination logging directory `{destination}`: {e}'
+
     logger.info(' > Copying' if cpy else ' > Moving')
     logger.info(f'    > source      = {source}')
     logger.info(f'    > destination = {destination}')

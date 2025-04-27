@@ -1,6 +1,7 @@
 """
 Helpers for main functions of CLI interface and SSLH-worker
 """
+import shutil, os
 
 
 def __get_dep_step(config:dict, idf:str):
@@ -11,6 +12,11 @@ def __get_dep_step(config:dict, idf:str):
         if s['identifier'] == idf :
             return s['function']
     raise RuntimeError(f'cannot find `{idf}` in job_steps')
+
+def getospath(path:str):
+    return os.sep.join([ n for m in path.split('/') for n in m.split('\\') ])
+def delosdir(path:str, ignore_errors:bool=True):
+    return shutil.rmtree(getospath(path), ignore_errors=ignore_errors)
 
 def set_si_kwargs(si, config:dict)->dict:
     gkwargs = si.get_global_job_kwargs()
