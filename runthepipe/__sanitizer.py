@@ -49,6 +49,7 @@ STEP_DEPENDENCIES = {
     ],
     # Export to MatLab requires sorting OR load_sorting AND analyzer OR load_analyzer
     "export2matlab": [
+        ("recording", "combined_recording"),
         ("sorting","load_sorting","import_from_phy"),
         ("analyzer","load_analyzer"),
         ("phy_export","import_from_phy")
@@ -244,7 +245,7 @@ def job_steps_sanity(config:dict)->(int,str):
         if s['identifier'] in prev_steps_ids:
             return 'The identifier `{}` is not unique! Step #{} has the same identifier'.format(s['identifier'], prev_steps_ids.index(s['identifier'])+1) 
             
-        allowed_dependencies = STEP_DEPENDENCIES[ s['function'] ] 
+        allowed_dependencies = STEP_DEPENDENCIES[ s['function'] ]
         if len(allowed_dependencies) != len(s['depends']):
             return 'Too many or Not enough dependencies in step #{}. Needs {} but given {}'.format(sid+1,len(allowed_dependencies),len(s['depends'])) 
             

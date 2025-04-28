@@ -631,16 +631,16 @@ def analyzer(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         logger.error(f'Cannot setup `spikeinterface` kwargs :{e}')
         raise RuntimeError(f'Cannot setup `spikeinterface` kwargs :{e}')
 
-    logger.info(f"ANALYZER:")    
-    subfolder = analyzeconf['folder'] if 'folder' in analyzeconf else identifier
-    logger.info(f" > folder : {subfolder}")
+    logger.info(f" > ANALYZER:")    
+    analyzedir = config['job_evn']['base directory'] + '/' + (analyzeconf['folder'] if 'folder' in analyzeconf else identifier)
+    logger.info(f"    > folder : {analyzedir}")
     recording  = carrier[ dependencies[0] ]
     sorting    = carrier[ dependencies[1] ]
     try:    
         analyzer = si.create_sorting_analyzer(
             recording=recording,
             sorting=sorting,
-            folder=config['job_evn']['base directory']+f'/{subfolder}',
+            folder=analyzedir,
             format="binary_folder",
             overwrite=True
             )
@@ -1000,19 +1000,20 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
     try:
         import h5py
         import csv
+        import numpy as np
     except:
         logger.error(f'`h5py` must be installed to run matlab exporting')
         raise RuntimeError(f'`h5py` must be installed to run matlab exporting')
 
-
-    sorting   = carrier[ dependencies[0] ]
-    analyzer  = carrier[ dependencies[1] ]
-    depfun    = __get_dep_step(dependencies[2])
+    reconfig  =  config[ dependencies[0] ]
+    sorting   = carrier[ dependencies[1] ]
+    analyzer  = carrier[ dependencies[2] ]
+    depfun    = get_dep_step(config, dependencies[3])
     
     if    depfun == "phy_export":
-        phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[dependencies[2]] else 'phy')
+        phydir = config['job_evn']['base directory']+'/'+ ( config[identifier]['folder'] if 'folder' in config[dependencies[3]] else 'phy')
     elif  depfun == "import_from_phy":
-        phydir = config[ dependencies[2] ]['phy_folder']
+        phydir = config[ dependencies[3] ]['phy_folder']
     else:
         logger.error(f'The third dependence `{dependencies[2]}` is not phy_export or import_from_phy. In theory we should be here (-.-)')
         raise RuntimeError(f'The third dependence `{dependencies[2]}` is not phy_export or import_from_phy. In theory we should be here (-.-)')
@@ -1030,6 +1031,10 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
 
         phyids = array([ int(x) for x in phyids])
 
+    chpos = np.array([])
+    if os.path.isfile(f'{phydir}/channel_positions.npy'):
+        chpos = np.load(f'{phydir}/channel_positions.npy')
+    
     spikes = sorting.to_spike_vector()
     if isinstance(spikes, ndarray):
         spikes = array([
@@ -1074,8 +1079,11 @@ def export2matlab(config:dict,identifier:str,dependencies:(list,tuple),carrier:d
         usw[unit_ind,:wfs.shape[0],:,:wfs.shape[2]] = wfs
         usw_d.append( list(wfs.shape) )
 
-    actchids = [ i for i in range(last["recording"]["number of channels"]) ]
-    for b in last["recording"]["remove"]+last["recording"]["bad_channels"]:
+    actchids = [ i for i in range(reconfig["number of channels"]) ]
+    inactive_channels =\
+        ( reconfig[   'remove'   ] if    'remove'    in reconfig else [] )+\
+        ( reconfig['bad_channels'] if 'bad_channels' in reconfig else [] )
+    for b in inactive_channels:
         if b in actchids: actchids.remove(b)
     actchids = array(actchids+[-1],dtype=int)
     templates_indx = copy(templates_ind)

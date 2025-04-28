@@ -4,7 +4,7 @@ Helpers for main functions of CLI interface and SSLH-worker
 import shutil, os
 
 
-def __get_dep_step(config:dict, idf:str):
+def get_dep_step(config:dict, idf:str):
     if not 'job_steps' in config:
         raise RuntimeError(f'cannot find job_steps in configuration ')
     jobsteps = config['job_steps']
@@ -25,6 +25,7 @@ def set_si_kwargs(si, config:dict)->dict:
         if not x in lkwargs:
             lkwargs[x] = gkwargs[x]
     return lkwargs
+
 def check_schema_an_enry(entry,sch)->(int,str):
     """
     Recursively checks if an `entry` is consistent with the schema `sch`
