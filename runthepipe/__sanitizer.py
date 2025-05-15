@@ -5,7 +5,6 @@ import  os,\
 import json
 from inspect import getsourcefile
 import psutil
-from numpy import *
 import copy as pycopy
 try:
     from .__helpers import *
@@ -99,7 +98,7 @@ STEP_PARAMETERS = {
             }
     ),
     "preprocessing": {
-        "*methods": [ str ] ,
+        "*methods": [ ("centering", "highpass or band filtering", "referensing", "whitening", "zscore") ] ,
         ">centering" : {
             '>mode': ('median', 'mean')
         }, 
@@ -129,7 +128,7 @@ STEP_PARAMETERS = {
         ">zscore": {
             '>mode' : ('median+mad', 'mean+std')
         },
-        "folder":str
+        ">folder":str
     },
     "load_preprocessing": {
         "*folder": str
@@ -321,7 +320,7 @@ def sanitize_sorting(config:dict,identifier:str)->(int,str):
     try:
         import spikeinterface.full as si
     except:
-        return f'Cannot check analyzer - spikeinterface is not installed'
+        return f'Cannot check sorting - spikeinterface is not installed'
     
     sorter     = config[identifier]['name']
     parameters = config[identifier]['parameters']
