@@ -59,10 +59,14 @@ STEP_DEPENDENCIES = {
 }
 
 
-# The first character of the name defines where it is *required or >optional parameter,
+# The first character of the name defines where it is *required or >optional parameter, however
+#    if there is ++ parameter this step may have any number of uncontrolled parameters. 
+#
+# Value are the acceptable types for the parameter,
 # if a value is a tuple - it is a choice.
 # if a value is a list with one element - any number of elements are allowed, 
 #    otherwise number of elements should be strictly equal to the number of elements in the list.
+
 STEP_PARAMETERS = {
     "combined_recording" : {
         '*input files'        : [ str ],
@@ -170,8 +174,8 @@ STEP_PARAMETERS = {
 
 JOB_CONFIG = {
     "*version" : "0.4.1",
-    "*si"      : "0.101.0",
-    "*job_id"  : str,
+    ">si"      : "0.101.0",
+    ">job_id"  : str,
     "*job_evn" : {
         "*base directory": str,
         "*job_kwargs"    : {
