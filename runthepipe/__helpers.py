@@ -67,6 +67,10 @@ def check_schema_an_enry(entry,sch)->(int,str):
             return 0
     elif type(sch) is dict:
         if not type(entry) is dict: return f'entry `{entry}` is not a dictionary'
+        for n in sch:
+            if not n[0] in ('*','+'):
+                if n != '++':
+                    return f'schema error: find entrance `{n}` which does not start from `*` or `>` and is not `++`'
         reqnames = [ x[1:] for x in sch if x[0] == '*' ]
         optnames = [ x[1:] for x in sch if x[0] == '>' ]
         allnames = [ x[1:] for x in sch                ]
@@ -84,6 +88,9 @@ def check_schema_an_enry(entry,sch)->(int,str):
         for n in entry :
             if not n in allnames and not '+' in allnames:
                 return f'unknown entry `{n}` for a dictionary'
+            x = check_schema_an_enry(entry[n],sch['++'])
+            if x != 0:
+                return f'while card `++` and dictionary entry {n} returns error: {x}'
         return 0
     else:
         return f'we should be here! {entry}, {sch}'
