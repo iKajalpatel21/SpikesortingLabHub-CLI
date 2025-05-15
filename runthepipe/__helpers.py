@@ -95,10 +95,6 @@ def check_schema_an_enry(entry,sch)->(int,str):
                     return f'unknown entry `{n}` for a dictionary'
         return 0
     else:
-        #DB>>
-        print(sch in (str, bool, int, float, list, dict))
-        print(type(entry) is sch)
-        #<<DB
         return f'we should be here! {entry}, {sch}'
 
 def recursive_schema(d:dict, mitigate_none=False)->dict:
