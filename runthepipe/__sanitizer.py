@@ -18,6 +18,7 @@ except:
 STEP_DEPENDENCIES = {
     "combined_recording": [],
     "recording": [],
+    "load_recording": [],
     # Preprocessing needs only a recording
     "preprocessing": [("recording","combined_recording")],
     # Loading a previously done preprocessing doesn't need anything
@@ -77,7 +78,8 @@ STEP_PARAMETERS = {
         ">bad_channels"       : [ int ],
         ">location"           : str,
         ">gain_to_uV"         : (int, float),
-        ">offset_to_uV"       : (int, float)
+        ">offset_to_uV"       : (int, float),
+        ">save"               : (bool, str )
     },
     "recording"    : (
             {
@@ -89,14 +91,19 @@ STEP_PARAMETERS = {
                 ">bad_channels"       : [ int ],
                 ">location"           : str,
                 ">gain_to_uV"         : (int, float),
-                ">offset_to_uV"       : (int, float)
+                ">offset_to_uV"       : (int, float),
+                ">save"               : (bool, str )
             },
             {
                 '*neuralynx'          : str,
                 '*probe'              : str,
                 ">bad_channels"       : [ int ],
+                ">save"               : (bool, str )
             }
     ),
+    "load_recording" : {
+        ">file": str,
+    },
     "preprocessing": {
         "*methods": [ ("centering", "highpass or band filtering", "referensing", "whitening", "zscore") ] ,
         ">centering" : {

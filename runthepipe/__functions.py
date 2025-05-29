@@ -104,6 +104,7 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
         logger.error(f'Cannot combined files into one: {e}')
         raise RuntimeError(f'Cannot combined files into one: {e}')
 
+    logger.info('Files merged')
     rec_scales = {}
     if 'gain_to_uV' in recconf:
         rec_scales['gain_to_uV'] = recconf['gain_to_uV']
@@ -151,29 +152,23 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
         and  len(recconf["bad_channels"]) > 0:
         recording = recording.remove_channels(recconf["bad_channels"])
     
+    if "save" in recconf:
+        savefile = recconf["save"] if type(recconf["save"]) is str else \
+            ( (os.path.splitext(recconf['combined file'])[0]+'.json') if recconf["save"] else None )
+        if not savefile is None:
+            recconf['binfile'] = recconf['combined file']
+            del recconf['input files'], recconf['combined file']
+            try:
+                with open(savefile,'w') as fd:
+                    json.dump(recconf, fd, indent=4)
+            except BaseException as e:
+                logger.warning(f'Cannot save recording configuration into {savefile}: {e}')
+
+    logger.infor('Combined recording is created')
     carrier[identifier] = recording
     return carrier
-       
-def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
-    """
-    Reads a recording, sets probe configuration, used channels, and bad channels.
     
-    """
-    logger = logging.getLogger( config['job_id']+':'+identifier )
-
-    if not identifier in config:
-        logger.error(f'Cannot find `{identifier}` in the configuration')
-        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
-
-    x = step_sanity(config,'recording',identifier)
-    if x != 0:
-        logger.error(f'There is inconsistencies in the configuration for `recording`: {x}')
-        raise RuntimeError(f'There is inconsistencies in the configuration for `recording`: {x}')
-
-
-    recconf = config[identifier]
-    
-    
+def __create_recording(recconf:dict):
     if 'envs' in config['job_evn']:
         if type(config['job_evn']['envs']) is dict:
             for ev in config['job_evn']['envs']:
@@ -240,6 +235,76 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         and type(recconf["bad_channels"]) is list\
         and  len(recconf["bad_channels"]) > 0:
         recording = recording.remove_channels(recconf["bad_channels"])
+
+    if "save" in recconf:
+        savefile = recconf["save"] if type(recconf["save"]) is str else \
+            ( (os.path.splitext(recconf['binfile'] if 'binfile' in recconf else recconf['neuralynx'])[0]+'.json') \
+                if recconf["save"] else None )
+        if not savefile is None:
+            try:
+                with open(savefile,'w') as fd:
+                    json.dump(recconf, fd, indent=4)
+            except BaseException as e:
+                logger.warning(f'Cannot save recording configuration into {savefile}: {e}')
+
+    return recording
+    
+def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Reads a recording, sets probe configuration, used channels, and bad channels.
+    
+    """
+    logger = logging.getLogger( config['job_id']+':'+identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'recording',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `recording`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `recording`: {x}')
+
+
+    recconf = config[identifier]
+    
+    recording = __create_recording(recconf)
+    
+    logger.infor('Recording is created')
+
+    carrier[identifier] = recording
+    return carrier
+
+    
+def load_recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
+    """
+    Load recording configurations and creates the recording.
+    
+    """
+    logger = logging.getLogger( config['job_id']+':'+identifier )
+
+    if not identifier in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config,'load_recording',identifier)
+    if x != 0:
+        logger.error(f'There is inconsistencies in the configuration for `recording`: {x}')
+        raise RuntimeError(f'There is inconsistencies in the configuration for `recording`: {x}')
+
+    loadrecconf = config[identifier]
+    try:
+        with open(loadrecconf['file']) as fd:
+            recconf = json.load(fd)
+    except BaseException as e:
+        logger.error('Cannot load recoding configuration from `{}`: {}'.format(loadrecconf['file'],e))
+        raise RuntimeError('Cannot load recoding configuration from `{}`: {}'.format(loadrecconf['file'],e))
+    recconf['save'] = False
+    
+    recording = __create_recording(recconf)
+    
+    logger.infor('Recording is loaded')
+
     carrier[identifier] = recording
     return carrier
     
@@ -843,7 +908,7 @@ def phy_export(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict
     if pphash == phhash:
         logger.info(" > The both files are identical! Removing phy file")
         os.remove(phfile)
-        phy_config = re.sub(r'dat_path .*\n',f'dat_path = "../'+(last['preprocessing']['folder'] if 'folder' in last['preprocessing'] else "preprocessed")+'/traces_cached_seg0.raw"\n',phy_config)
+        phy_config = re.sub(r'dat_path .*\n',f'dat_path = "../'+(config[dependencies[0]]['folder'] if 'folder' in config[dependencies[0]] else dependencies[0])+'/traces_cached_seg0.raw"\n',phy_config)
     else:
         logger.info(" > The files are different - leaving both")
         phy_config = re.sub(r'dat_path .*\n',f'dat_path = "recording.dat"\n',phy_config)
