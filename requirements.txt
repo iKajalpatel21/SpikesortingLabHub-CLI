@@ -1,3 +1,6 @@
 psutil==7.0.0
 spikeinterface[full]==0.101.0
+numcodecs==0.13.1
+spython==0.3.14
+docker==7.1.0
 h5py

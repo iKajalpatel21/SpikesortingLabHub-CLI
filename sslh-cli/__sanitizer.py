@@ -309,7 +309,8 @@ def job_steps_sanity(config:dict)->(int,str):
 def step_sanity(config:dict, function:str, identifier:str)->(int,str):
     logger = logging.getLogger( 'step_sanity_check' )
     if not identifier in config:
-        return f'Cannot find `{identifier}` key in the config'    
+        logger.error( f'Cannot find `{identifier}` key in the config' )
+        return f'Cannot find `{identifier}` key in the config'
     
     stepsm = STEP_PARAMETERS[ function ]
     steppr = config[identifier]

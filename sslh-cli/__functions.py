@@ -168,7 +168,8 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
     carrier[identifier] = recording
     return carrier
     
-def __create_recording(recconf:dict):
+def __create_recording(recconf:dict,config:dict):
+    logger = logging.getLogger( '__create_recording '+config['job_id'])
     if 'envs' in config['job_evn']:
         if type(config['job_evn']['envs']) is dict:
             for ev in config['job_evn']['envs']:
@@ -265,12 +266,13 @@ def recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict)
         logger.error(f'There is inconsistencies in the configuration for `recording`: {x}')
         raise RuntimeError(f'There is inconsistencies in the configuration for `recording`: {x}')
 
-
+   
+    
     recconf = config[identifier]
     
-    recording = __create_recording(recconf)
+    recording = __create_recording(recconf,config)
     
-    logger.infor('Recording is created')
+    logger.info('Recording is created')
 
     carrier[identifier] = recording
     return carrier
