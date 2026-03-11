@@ -147,7 +147,7 @@ def run_the_job(config:dict, job_conf, api:(dict,None)=None, proconly:list=[], s
     job_conf = sslh.resolve_paths(job_conf, config["LOCAL"], config["NAS"], job_conf["job_id"])
     
     # setting log
-    if setlog
+    if setlog:
         x = sslh.set_logging(job_conf)
         if x != 0:
             return f'Cannot set up log file: {x}'
