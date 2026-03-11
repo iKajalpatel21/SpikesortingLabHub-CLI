@@ -6,7 +6,7 @@ It requires at least one job file as a command-line argument to perform any task
 ## Installation
 ```bash
 pip install git+https://github.com/UserFriendlySpikesorting/SpikesortingLabHub-CLI.git
-``
+```
 
 ## Usage
 ```bash
