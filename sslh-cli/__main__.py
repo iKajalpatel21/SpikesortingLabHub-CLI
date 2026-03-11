@@ -135,7 +135,7 @@ def create_base_directory_and_save_pipeline_json(job_config:dict)->(int,str):
     return 0
 
 
-def run_the_job(config:dict, job_conf, api:(dict,None)=None, proconly:list=[]):
+def run_the_job(config:dict, job_conf, api:(dict,None)=None, proconly:list=[], setlog:bool=True):
     if not api is None:
         if not 'status_updater' in api:
             return f'API is set but there is no status_updater key with updater function'
@@ -147,9 +147,10 @@ def run_the_job(config:dict, job_conf, api:(dict,None)=None, proconly:list=[]):
     job_conf = sslh.resolve_paths(job_conf, config["LOCAL"], config["NAS"], job_conf["job_id"])
     
     # setting log
-    x = sslh.set_logging(job_conf)
-    if x != 0:
-        return f'Cannot set up log file: {x}'
+    if setlog
+        x = sslh.set_logging(job_conf)
+        if x != 0:
+            return f'Cannot set up log file: {x}'
     # setting stdout and stderr
     x = sslh.set_std(job_conf)
     if x != 0:
@@ -212,59 +213,72 @@ def run_the_job(config:dict, job_conf, api:(dict,None)=None, proconly:list=[]):
     if not api is None: update_status(job_id, None, "completed", **api)
     return restory_std()
 
-def update_env(last:dict,ncpu,memory,chunkdur,progress)->dict:
+def update_env(job_conf:dict,ncpu,memory,chunkdur,progress)->dict:
     if ncpu:
-        if "job_evn" in last and "job_kwargs" in last["job_evn"] and "n_jobs"  in last["job_evn"]["job_kwargs"]:
-            last["job_evn"]["job_kwargs"]["n_jobs"] = ncpu
-        elif "job_evn" in last and "job_kwargs" in last["job_evn"]:
-            last["job_evn"]["job_kwargs"] = { "n_jobs" : ncpu }
+        if "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"] and "n_jobs"  in job_conf["job_evn"]["job_kwargs"]:
+            job_conf["job_evn"]["job_kwargs"]["n_jobs"] = ncpu
+        elif "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"]:
+            job_conf["job_evn"]["job_kwargs"] = { "n_jobs" : ncpu }
         else:
-            last["job_evn"] = { "job_kwargs" : { "n_jobs" : ncpu } }            
+            job_conf["job_evn"] = { "job_kwargs" : { "n_jobs" : ncpu } }            
     if memory:
         memory = f"{int(psutil.virtual_memory()[1]*memory/ncpus)//1024//1024//1024:d}G",
-        if "job_evn" in last and "job_kwargs" in last["job_evn"] and "total_memory"  in last["job_evn"]["job_kwargs"]:
-            last["job_evn"]["job_kwargs"]["total_memory"] = memory
-        elif "job_evn" in last and "job_kwargs" in last["job_evn"]:
-            last["job_evn"]["job_kwargs"] = { "total_memory" : memory }
+        if "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"] and "total_memory"  in job_conf["job_evn"]["job_kwargs"]:
+            job_conf["job_evn"]["job_kwargs"]["total_memory"] = memory
+        elif "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"]:
+            job_conf["job_evn"]["job_kwargs"] = { "total_memory" : memory }
         else:
-            last["job_evn"] = { "job_kwargs" : { "total_memory" : memory } }
+            job_conf["job_evn"] = { "job_kwargs" : { "total_memory" : memory } }
     if chunkdur:
-        if "job_evn" in last and "job_kwargs" in last["job_evn"] and "chunk_duration"  in last["job_evn"]["job_kwargs"]:
-            last["job_evn"]["job_kwargs"]["chunk_duration"] = chunkdur
-        elif "job_evn" in last and "job_kwargs" in last["job_evn"]:
-            last["job_evn"]["job_kwargs"] = { "chunk_duration" : chunkdur }
+        if "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"] and "chunk_duration"  in job_conf["job_evn"]["job_kwargs"]:
+            job_conf["job_evn"]["job_kwargs"]["chunk_duration"] = chunkdur
+        elif "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"]:
+            job_conf["job_evn"]["job_kwargs"] = { "chunk_duration" : chunkdur }
         else:
-            last["job_evn"] = { "job_kwargs" : { "chunk_duration" : chunkdur } }
+            job_conf["job_evn"] = { "job_kwargs" : { "chunk_duration" : chunkdur } }
     if progress:
-        if "job_evn" in last and "job_kwargs" in last["job_evn"] and "progress_bar"  in last["job_evn"]["job_kwargs"]:
-            last["job_evn"]["job_kwargs"]["progress_bar"] = progress
-        elif "job_evn" in last and "job_kwargs" in last["job_evn"]:
-            last["job_evn"]["job_kwargs"] = { "progress_bar" : progress }
+        if "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"] and "progress_bar"  in job_conf["job_evn"]["job_kwargs"]:
+            job_conf["job_evn"]["job_kwargs"]["progress_bar"] = progress
+        elif "job_evn" in job_conf and "job_kwargs" in job_conf["job_evn"]:
+            job_conf["job_evn"]["job_kwargs"] = { "progress_bar" : progress }
         else:
-            last["job_evn"] = { "job_kwargs" : { "progress_bar" : progress } }
-    return last
-        
-def timelimiter(config:dict, last:dict, proconly:list, timelimit:float):
-    logger = logging.getLogger(os.path.basename(last['job_id'])+"-timelimiter" )
-    logger.info("Time limit is active and set to {} hours =  {} seconds".format(last['time_limit'],int( round(last['time_limit']*3600) )))
+            job_conf["job_evn"] = { "job_kwargs" : { "progress_bar" : progress } }
+    return job_conf
+
+    
+def timelimiter(config:dict, job_conf:dict, proconly:list, h_timelimit:float):
+    x = sslh.base_check(job_conf)
+    if x != 0 :
+        return f'Base Configuration Checkout fails :{x}'
+    # Resolve all paths at ones
+    job_conf = sslh.resolve_paths(job_conf, config["LOCAL"], config["NAS"], job_conf["job_id"])
+    
+    # setting log
+    x = sslh.set_logging(job_conf)
+    if x != 0:
+        return f'Cannot set up log file: {x}'
+
+    logger = logging.getLogger(os.path.basename(job_conf['job_id'])+"-timelimiter" )
+    timelimit =  int( round(h_timelimit*3600) )
+    logger.info(f"Time limit is active and set to {h_timelimit} hours =  {timelimit} seconds\n")
     import signal
     def signal_handler(signum, frame):
+        ## Needs to clean the working directory
         raise Exception(f"Time limit {timelimit} is out")
+    
     signal.signal(signal.SIGALRM, signal_handler)
-    timelimit =  int( round(last['time_limit']*3600) )
     signal.alarm(timelimit)
-    logger.info(f'set time limit to {timelimit} seconds')
     try:
-        ret = run_the_job(config, last, proconly=proconly)
+        ret = run_the_job(config, job_conf, proconly=proconly, setlog=False)
     except BaseException as e:
-        logger.error(f'Run failed woth error message {e}')
-        return 1
+        logger.error(f'Run failed with an error message {e}')
+        return f'Run failed with an error message {e}'
     signal.alarm( 0 )
     return ret
             
 def main()->int:
     from optparse import OptionParser
-    oprs = OptionParser("USAGE: %prog [flags] running_task.json")
+    oprs = OptionParser("USAGE: %prog [options] running_task.json")
     oprs.add_option('-L' ,"--path-to-local-directory" , dest="local",default='.',     type="str",\
             help="path to local storage")
     oprs.add_option('-A' ,"--path-to-NAS"             , dest="NAS", default='.',     type="str",\
@@ -312,25 +326,25 @@ def main()->int:
         if os.path.isfile(arg):
             try:
                 with open(arg) as fd:
-                    last = json.load(fd)
+                    job_conf = json.load(fd)
             except BaseException as e:
                 sys.stderr.write(f'**cannot read {arg}: {e}**\n')
                 return 1
         else:
             sys.stderr.write(f'**Skipping {arg} as it is not a file**\n')
             continue
-        x = sslh.base_check(last)
+        x = sslh.base_check(job_conf)
         if x != 0 :
-            sys.stderr.write(f'Skipping {arg} - basic check returns an error :{x}')
+            sys.stderr.write(f'Skipping {arg} - basic check returns an error :{x}\n')
             continue
-        last = update_env(last, opts.ncpu, opts.memory, opts.chunkdur, opts.progress) 
+        job_conf = update_env(job_conf, opts.ncpu, opts.memory, opts.chunkdur, opts.progress) 
         if opts.timelim:
-            ret = timelimiter(env_cof,last,opts.proconly,opts.timelim)
+            ret = timelimiter(env_cof,job_conf,opts.proconly,opts.timelim)
         else:
-            ret = run_the_job(env_cof,last,proconly = opts.proconly)
+            ret = run_the_job(env_cof,job_conf,proconly = opts.proconly)
         if ret != 0:
-            sys.stderr.write(f'sslh-cli.main: Sorting {arg} failed :{ret}')
-            return ret
+            sys.stderr.write(f'sslh-cli.main: Sorting {arg} failed :{ret}\n')
+            return 1
                 
                     
 
