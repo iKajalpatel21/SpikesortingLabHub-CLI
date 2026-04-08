@@ -1215,7 +1215,47 @@ def upload(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
         suf = f'{randint(0xffff):04d}' if suf else ''
     
     source      = config['job_evn']['base directory']
-    destination = uploadconfig['destination']+suf
+    basepath    = uploadconfig["base path"]
+    if not 'destination' in uploadconfig:
+        import os
+        reconf = config[ dependencies[0] ]
+        if   'binfile'       in reconf:
+            binpath = reconf['binfile']
+        elif 'neuralynx'     in reconf:
+            binpath = reconf['neuralynx']
+        elif 'combined file' in reconf:
+            binpath = reconf['combined file']
+        else:
+            logger.error(f'Cannot find `binfile`, `neuralynx`, or `combined file` in recording dependance')
+            raise RuntimeError(f'Cannot find `binfile`, `neuralynx`, or `combined file` in recording dependance')
+        
+        binpath = os.path.normpath(binpath)
+        binpath = binpath.split(os.sep)
+        bp      = os.path.normpath(basepath)
+        bp      = bp.split(os.sep)
+        binpath = [ b for b in binpath if not b in bp ]
+        expt    = None
+        recd    = None
+        comb    = None
+        for b in binpath:
+            if   "experiment" in b:
+                expt = b
+            elif "recording"  in b:
+                recd = b
+            elif "combined"   in b:
+                comb,_ = os.path.splitext(b)
+        
+        uploadconfig['destination'] = os.path.join(\
+            os.path.normpath(basepath), \
+            binpath[0],
+            binpath[0] + \
+            ( "" if expt is None else f"-{expt}" ) +\
+            ( "" if recd is None else f"-{recd}" ) +\
+            ( "" if comb is None else f"-{comb}" )  )
+
+            
+            
+    destination = uploadconfig['destination']+f"-{config['job_id']}"+suf
     try:
         os.makedirs(
             os.path.dirname(destination), 

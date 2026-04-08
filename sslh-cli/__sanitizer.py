@@ -55,7 +55,7 @@ STEP_DEPENDENCIES = {
         ("phy_export","import_from_phy")
     ],
     # Upload whatever was done!
-    "upload": [],
+    "upload": [("recording","combined_recording")],
 }
 
 
@@ -172,7 +172,8 @@ STEP_PARAMETERS = {
         ">marks"   : [ str ]
     },
     "upload"       : {
-        "*destination"        : str,
+        "*base path"          : str,
+        ">destination"        : str,
         ">keep_base_directory": bool,
         ">suffix"             : (str, bool)
     }
