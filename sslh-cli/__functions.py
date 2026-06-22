@@ -5,6 +5,9 @@ import  os,\
 import json
 import psutil
 from numpy import *
+import builtins
+min = builtins.min  # restore built-ins shadowed by numpy's star import
+max = builtins.max
 import copy as pycopy
 
 try:
@@ -169,7 +172,9 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
             shape=(0, num_channels),
             maxshape=(None, num_channels),
             dtype=np.float64,
-            chunks=(min(10_000, ds_chunk if ds_chunk >= 1 else 1), num_channels),
+            chunks=(min(10_000, max(1, samples_per_chunk // ds_factor)), num_channels),
+            compression='gzip',
+            compression_opts=1,
         )
 
     total_raw_frames  = 0
@@ -337,9 +342,11 @@ def __cd_read_bit_volts(dat_path:str, num_channels:int):
 
 
 def __cd_infer_experiment_root(dat_path:str) -> str:
-    """Walk 7 levels up from continuous.dat to the experiment root directory."""
+    """Walk 6 levels up from continuous.dat to the session root directory.
+    Open Ephys layout: <session>/<RecordNode>/<experiment>/<recording>/continuous/<processor>/continuous.dat
+    """
     p = os.path.abspath(dat_path)
-    for _ in range(7):
+    for _ in range(6):
         p = os.path.dirname(p)
     return p if os.path.isdir(p) else os.path.dirname(os.path.dirname(os.path.abspath(dat_path)))
 
