@@ -50,7 +50,7 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
 
     Produces up to two output files depending on mode:
       combined_raw_<name>.dat  -- full-rate int16, feed directly into combined_recording
-      combined_ds<N>_<name>.h5 -- downsampled float64, time x channels, in microvolts
+      combined_dsN_name.mat -- downsampled float64, time x channels, in microvolts (HDF5 v7.3)
 
     Config keys:
       *input files        : list of .dat paths  OR  a single experiment folder string
@@ -126,7 +126,7 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     base_name       = output_name if output_name else root_name
     out_dir         = out_dir_override if out_dir_override else os.path.join(experiment_root, f'combined_{root_name}')
     raw_file        = os.path.join(out_dir, f'combined_raw_{base_name}.dat')
-    ds_file         = os.path.join(out_dir, f'combined_ds{ds_factor}_{base_name}.h5')
+    ds_file         = os.path.join(out_dir, f'combined_ds{ds_factor}_{base_name}.mat')
 
     if do_raw and os.path.isfile(raw_file):
         raise RuntimeError(f'Raw output already exists — delete it first:\n{raw_file}')
