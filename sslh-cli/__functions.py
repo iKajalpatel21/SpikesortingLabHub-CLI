@@ -162,13 +162,14 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     ds_row_idx = 0
 
     if do_ds:
-        h5f   = h5py.File(ds_file, 'w')
+        h5f    = h5py.File(ds_file, 'w')
+        ds_chunk = samples_per_chunk // ds_factor
         h5_ds = h5f.create_dataset(
             'data',
             shape=(0, num_channels),
             maxshape=(None, num_channels),
             dtype=np.float64,
-            chunks=(min(10_000, max(1, samples_per_chunk // ds_factor)), num_channels),
+            chunks=(min(10_000, ds_chunk if ds_chunk >= 1 else 1), num_channels),
         )
 
     total_raw_frames  = 0
