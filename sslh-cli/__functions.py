@@ -44,11 +44,305 @@ Each step function has the same arguments:
 |  `carrier`   |    dict     | Results of the previous steps                                   |
 """
 
+def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple), carrier:dict):
+    """
+    Combine Open Ephys continuous.dat files and/or downsample to LFP in a single read pass.
+
+    Produces up to two output files depending on mode:
+      combined_raw_<name>.dat  -- full-rate int16, feed directly into combined_recording
+      combined_ds<N>_<name>.h5 -- downsampled float64, time x channels, in microvolts
+
+    Config keys:
+      *input files        : list of .dat paths  OR  a single experiment folder string
+      *number of channels : int
+      *downsample factor  : int   (e.g. 30 -> 30 kHz becomes 1 kHz)
+      >mode               : 'both' | 'combine' | 'downsample'   (default: 'both')
+      >output name        : str
+      >output folder      : str   (overrides auto-derived output directory)
+
+    carrier[identifier] = { 'raw file': <path>, 'ds file': <path> }
+    """
+    import numpy as np
+    import h5py
+
+    logger = logging.getLogger(config['job_id'] + ':' + identifier)
+    logger.info('=== combine_and_downsample ===')
+
+    if identifier not in config:
+        logger.error(f'Cannot find `{identifier}` in the configuration')
+        raise RuntimeError(f'Cannot find `{identifier}` in the configuration')
+
+    x = step_sanity(config, 'combine_and_downsample', identifier)
+    if x != 0:
+        logger.error(f'Configuration inconsistency in `combine_and_downsample`: {x}')
+        raise RuntimeError(f'Configuration inconsistency in `combine_and_downsample`: {x}')
+
+    stepconf         = config[identifier]
+    num_channels     = int(stepconf['number of channels'])
+    ds_factor        = int(stepconf['downsample factor'])
+    mode             = stepconf.get('mode', 'both')
+    output_name      = stepconf.get('output name', '')
+    out_dir_override = stepconf.get('output folder', None)
+
+    if mode not in ('both', 'combine', 'downsample'):
+        raise RuntimeError(f'`mode` must be both/combine/downsample, got: {mode!r}')
+
+    do_raw = mode in ('both', 'combine')
+    do_ds  = mode in ('both', 'downsample')
+
+    # Resolve input files
+    raw_input = stepconf['input files']
+    if isinstance(raw_input, str) and os.path.isdir(raw_input):
+        input_files = []
+        for root, _, files in os.walk(raw_input):
+            if 'continuous.dat' in files:
+                input_files.append(os.path.join(root, 'continuous.dat'))
+        input_files.sort()
+        if not input_files:
+            raise RuntimeError(f'No continuous.dat files found under: {raw_input}')
+        logger.info(f'Auto-discovered {len(input_files)} file(s) in: {raw_input}')
+    elif isinstance(raw_input, (list, tuple)):
+        input_files = [str(p) for p in raw_input]
+    else:
+        input_files = [str(raw_input)]
+
+    if not input_files:
+        raise RuntimeError('`input files` is empty')
+
+    bytes_per_frame = num_channels * 2
+    for p in input_files:
+        if not os.path.isfile(p):
+            raise RuntimeError(f'Input file does not exist: {p}')
+        size = os.path.getsize(p)
+        if size % bytes_per_frame != 0:
+            valid = [n for n in range(1, 513) if size % (n * 2) == 0]
+            raise RuntimeError(
+                f'File size ({size} B) not divisible by number_of_channels*2 ({bytes_per_frame}).\n'
+                f'Passed number of channels={num_channels}; valid values: {valid}\nFile: {p}'
+            )
+
+    experiment_root = __cd_infer_experiment_root(input_files[0])
+    root_name       = os.path.basename(experiment_root)
+    base_name       = output_name if output_name else root_name
+    out_dir         = out_dir_override if out_dir_override else os.path.join(experiment_root, f'combined_{root_name}')
+    raw_file        = os.path.join(out_dir, f'combined_raw_{base_name}.dat')
+    ds_file         = os.path.join(out_dir, f'combined_ds{ds_factor}_{base_name}.h5')
+
+    if do_raw and os.path.isfile(raw_file):
+        raise RuntimeError(f'Raw output already exists — delete it first:\n{raw_file}')
+    if do_ds and os.path.isfile(ds_file):
+        raise RuntimeError(f'DS output already exists — delete it first:\n{ds_file}')
+
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except BaseException as e:
+        raise RuntimeError(f'Cannot create output directory {out_dir}: {e}')
+
+    try:
+        from scipy.signal import cheby1, lfilter
+        ds_method = 'decimate'
+    except ImportError:
+        ds_method = 'blockmean'
+        logger.warning('scipy not found — using block-mean averaging instead of Chebyshev filter')
+
+    logger.info(f'Input files      : {len(input_files)}')
+    logger.info(f'Channels         : {num_channels}')
+    logger.info(f'Mode             : {mode}')
+    logger.info(f'Downsample by    : {ds_factor} ({ds_method})')
+    if do_raw: logger.info(f'Raw output       : {raw_file}')
+    if do_ds:  logger.info(f'DS  output       : {ds_file}')
+
+    samples_per_chunk = 1 * 60 * 30_000
+    values_per_chunk  = samples_per_chunk * num_channels
+
+    raw_fid    = open(raw_file, 'wb') if do_raw else None
+    h5f        = None
+    h5_ds      = None
+    ds_row_idx = 0
+
+    if do_ds:
+        h5f   = h5py.File(ds_file, 'w')
+        h5_ds = h5f.create_dataset(
+            'data',
+            shape=(0, num_channels),
+            maxshape=(None, num_channels),
+            dtype=np.float64,
+            chunks=(min(10_000, max(1, samples_per_chunk // ds_factor)), num_channels),
+        )
+
+    total_raw_frames  = 0
+    total_ds_frames   = 0
+    any_bit_volts     = False
+
+    # Carry state preserves continuity at chunk and file boundaries.
+    # blockmean: partial tail of the last block is prepended to the next chunk.
+    # decimate:  IIR filter state vector is forwarded so there are no transients.
+    if ds_method == 'blockmean':
+        carry = np.empty((num_channels, 0), dtype=np.int16)
+    else:
+        from scipy.signal import cheby1, lfilter
+        b_filt, a_filt    = cheby1(8, 0.05, 0.8 / ds_factor)
+        filter_order      = max(len(a_filt), len(b_filt)) - 1
+        filt_zi           = np.zeros((filter_order, num_channels))
+        global_sample_idx = 0
+
+    try:
+        for file_idx, src_file in enumerate(input_files, 1):
+            logger.info(f'[{file_idx}/{len(input_files)}] {src_file}')
+
+            bit_volts = __cd_read_bit_volts(src_file, num_channels)
+            if bit_volts is not None:
+                logger.info(f'  bit_volts: {float(bit_volts[0]):.6f} uV/count')
+                any_bit_volts = True
+            else:
+                logger.info('  bit_volts: not found — LFP will be raw ADC counts')
+
+            try:
+                in_fid = open(src_file, 'rb')
+            except BaseException as e:
+                raise RuntimeError(f'Cannot open {src_file}: {e}')
+
+            try:
+                chunk_count = 0
+                while True:
+                    raw = np.fromfile(in_fid, dtype=np.int16, count=values_per_chunk)
+                    if raw.size == 0:
+                        break
+
+                    complete = raw.size - (raw.size % num_channels)
+                    if complete != raw.size:
+                        logger.warning(f'Dropping {raw.size - complete} trailing value(s) in {src_file}')
+                        raw = raw[:complete]
+
+                    n_frames = complete // num_channels
+
+                    if do_raw:
+                        raw.tofile(raw_fid)
+                        total_raw_frames += n_frames
+
+                    if do_ds:
+                        # Interleaved int16: [ch0_t0, ch1_t0, ..., chN_t0, ch0_t1, ...]
+                        # Reshape to (n_frames, num_channels) then transpose -> (num_channels, n_frames)
+                        data = raw.reshape(n_frames, num_channels).T
+
+                        if ds_method == 'blockmean':
+                            data       = np.concatenate([carry, data], axis=1)
+                            nf         = data.shape[1]
+                            n_complete = (nf // ds_factor) * ds_factor
+                            carry      = data[:, n_complete:]
+                            if n_complete > 0:
+                                trimmed  = data[:, :n_complete].astype(np.float64)
+                                reshaped = trimmed.reshape(num_channels, ds_factor, -1)
+                                averaged = reshaped.mean(axis=1)
+                                if bit_volts is not None:
+                                    averaged *= bit_volts
+                                data_ds  = averaged.T
+                                n_rows   = data_ds.shape[0]
+                                h5_ds.resize(ds_row_idx + n_rows, axis=0)
+                                h5_ds[ds_row_idx: ds_row_idx + n_rows] = data_ds
+                                ds_row_idx      += n_rows
+                                total_ds_frames += n_rows
+
+                        else:
+                            filtered = np.empty_like(data, dtype=np.float64)
+                            for ch in range(num_channels):
+                                y, zf          = lfilter(b_filt, a_filt,
+                                                         data[ch].astype(np.float64),
+                                                         zi=filt_zi[:, ch])
+                                filtered[ch]   = y
+                                filt_zi[:, ch] = zf
+
+                            first_idx = int((-global_sample_idx) % ds_factor)
+                            if first_idx < n_frames:
+                                pick_idx = np.arange(first_idx, n_frames, ds_factor)
+                                data_ds  = filtered[:, pick_idx]
+                                if bit_volts is not None:
+                                    data_ds *= bit_volts
+                                data_ds  = data_ds.T
+                                n_rows   = data_ds.shape[0]
+                                h5_ds.resize(ds_row_idx + n_rows, axis=0)
+                                h5_ds[ds_row_idx: ds_row_idx + n_rows] = data_ds
+                                ds_row_idx      += n_rows
+                                total_ds_frames += n_rows
+                            global_sample_idx += n_frames
+
+                    chunk_count += 1
+
+            finally:
+                in_fid.close()
+
+            logger.info(f'  Done ({chunk_count} chunks)')
+
+        if do_ds and ds_method == 'blockmean' and carry.shape[1] > 0:
+            final = carry.astype(np.float64).mean(axis=1, keepdims=True)
+            if bit_volts is not None:
+                final *= bit_volts
+            h5_ds.resize(ds_row_idx + 1, axis=0)
+            h5_ds[ds_row_idx: ds_row_idx + 1] = final.T
+            total_ds_frames += 1
+            logger.info(f'Boundary flush: {carry.shape[1]} leftover frame(s) averaged into 1 output sample')
+
+    except BaseException as e:
+        if raw_fid:
+            raw_fid.close()
+            raw_fid = None
+        if h5f:
+            h5f.close()
+            h5f = None
+        logger.error(f'combine_and_downsample failed: {e}')
+        raise RuntimeError(f'combine_and_downsample failed: {e}')
+    finally:
+        if raw_fid:
+            raw_fid.close()
+        if h5f:
+            h5f.close()
+
+    if do_raw:
+        logger.info(f'Raw : {total_raw_frames} frames | {os.path.getsize(raw_file)/1024**3:.4f} GB | {raw_file}')
+    if do_ds:
+        logger.info(f'DS  : {total_ds_frames} frames | {os.path.getsize(ds_file)/1024**3:.4f} GB | {ds_file}')
+    if not any_bit_volts:
+        logger.warning('bit_volts not found for any input — DS data is raw ADC counts, not microvolts')
+
+    result = {}
+    if do_raw: result['raw file'] = raw_file
+    if do_ds:  result['ds file']  = ds_file
+    carrier[identifier] = result
+    logger.info('=== combine_and_downsample complete ===')
+    return carrier
+
+
+def __cd_read_bit_volts(dat_path:str, num_channels:int):
+    """Read per-channel bit_volts from structure.oebin. Returns (num_channels, 1) array or None."""
+    import numpy as np, json as _json
+    dat_dir   = os.path.dirname(os.path.abspath(dat_path))
+    json_path = os.path.join(os.path.dirname(os.path.dirname(dat_dir)), 'structure.oebin')
+    if not os.path.isfile(json_path):
+        return None
+    try:
+        with open(json_path) as fd:
+            meta = _json.load(fd)
+        bv = np.array([ch['bit_volts'] for ch in meta['continuous'][0]['channels']], dtype=np.float64)
+        if bv.size < num_channels:
+            return None
+        return bv[:num_channels, np.newaxis]
+    except Exception:
+        return None
+
+
+def __cd_infer_experiment_root(dat_path:str) -> str:
+    """Walk 7 levels up from continuous.dat to the experiment root directory."""
+    p = os.path.abspath(dat_path)
+    for _ in range(7):
+        p = os.path.dirname(p)
+    return p if os.path.isdir(p) else os.path.dirname(os.path.dirname(os.path.abspath(dat_path)))
+
+
 def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:dict):
     """
-    
+
     Combines several binary files in a one and creates a recording, then sets probe configuration, used channels, and bad channels.
-    
+
     """
     logger = logging.getLogger( config['job_id']+':'+identifier )
 

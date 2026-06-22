@@ -56,6 +56,8 @@ STEP_DEPENDENCIES = {
     ],
     # Upload whatever was done!
     "upload": [("recording","combined_recording")],
+    # Combine/downsample raw Open Ephys .dat files — standalone, no prior step required
+    "combine_and_downsample": [],
 }
 
 
@@ -176,6 +178,14 @@ STEP_PARAMETERS = {
         ">destination"        : str,
         ">keep_base_directory": bool,
         ">suffix"             : (str, bool)
+    },
+    "combine_and_downsample": {
+        "*input files"        : ([str], str),  # list of .dat paths OR single experiment folder
+        "*number of channels" : int,
+        "*downsample factor"  : int,
+        ">mode"               : ('both', 'combine', 'downsample'),
+        ">output name"        : str,
+        ">output folder"      : str,
     }
 }
 
