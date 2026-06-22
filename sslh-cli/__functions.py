@@ -95,7 +95,8 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     if isinstance(raw_input, str) and os.path.isdir(raw_input):
         input_files = []
         for root, _, files in os.walk(raw_input):
-            if 'continuous.dat' in files:
+            parts = os.path.relpath(root, raw_input).split(os.sep)
+            if 'continuous' in parts and 'continuous.dat' in files:
                 input_files.append(os.path.join(root, 'continuous.dat'))
         input_files.sort()
         if not input_files:
@@ -126,7 +127,7 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     base_name       = output_name if output_name else root_name
     out_dir         = out_dir_override if out_dir_override else os.path.join(experiment_root, f'combined_{root_name}')
     raw_file        = os.path.join(out_dir, f'combined_raw_{base_name}.dat')
-    ds_file         = os.path.join(out_dir, f'combined_ds{ds_factor}_{base_name}.mat')
+    ds_file         = os.path.join(out_dir, f'combined_ds{ds_factor}_{base_name}.h5')
 
     if do_raw and os.path.isfile(raw_file):
         raise RuntimeError(f'Raw output already exists — delete it first:\n{raw_file}')
@@ -324,9 +325,13 @@ def __cd_read_bit_volts(dat_path:str, num_channels:int):
             meta = _json.load(fd)
         bv = np.array([ch['bit_volts'] for ch in meta['continuous'][0]['channels']], dtype=np.float64)
         if bv.size < num_channels:
+            logging.getLogger(__name__).warning(
+                f'structure.oebin reports {bv.size} channels but num_channels={num_channels}. Skipping bit_volts.'
+            )
             return None
         return bv[:num_channels, np.newaxis]
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'read_bit_volts failed for {json_path}: {e}')
         return None
 
 
@@ -458,7 +463,7 @@ def combined_recording(config:dict,identifier:str,dependencies:(list,tuple),carr
             except BaseException as e:
                 logger.warning(f'Cannot save recording configuration into {savefile}: {e}')
 
-    logger.infor('Combined recording is created')
+    logger.info('Combined recording is created')
     carrier[identifier] = recording
     return carrier
     
@@ -597,9 +602,9 @@ def load_recording(config:dict,identifier:str,dependencies:(list,tuple),carrier:
         raise RuntimeError('Cannot load recoding configuration from `{}`: {}'.format(loadrecconf['file'],e))
     recconf['save'] = False
     
-    recording = __create_recording(recconf)
-    
-    logger.infor('Recording is loaded')
+    recording = __create_recording(recconf, config)
+
+    logger.info('Recording is loaded')
 
     carrier[identifier] = recording
     return carrier
