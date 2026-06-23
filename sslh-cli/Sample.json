@@ -1,0 +1,27 @@
+{
+    "version": "0.4.1",
+    "job_id": "combine_ds_example",
+    "job_evn": {
+        "base directory": "/path/to/experiment",
+        "job_kwargs": {
+            "n_jobs": 4,
+            "total_memory": "4G",
+            "chunk_duration": "1s",
+            "progress_bar": true
+        }
+    },
+    "job_steps": [
+        {
+            "function": "combine_and_downsample",
+            "identifier": "my_lfp",
+            "depends": []
+        }
+    ],
+    "my_lfp": {
+        "input files": "/path/to/20250521_HDC_Xsom_P6",
+        "number of channels": 64,
+        "downsample factor": 30,
+        "mode": "both",
+        "output name": "HDC_Xsom_P6"
+    }
+}
