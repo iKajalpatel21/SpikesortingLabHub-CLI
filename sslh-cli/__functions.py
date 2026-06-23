@@ -156,8 +156,10 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     if do_raw: logger.info(f'Raw output       : {raw_file}')
     if do_ds:  logger.info(f'DS  output       : {ds_file}')
 
-    samples_per_chunk = 1 * 60 * 30_000
-    values_per_chunk  = samples_per_chunk * num_channels
+    _one_minute       = 1 * 60 * 30_000
+    k                 = _one_minute // (ds_factor * num_channels)
+    values_per_chunk  = k * ds_factor * num_channels
+    samples_per_chunk = values_per_chunk // num_channels   # = k * ds_factor, always divisible by ds_factor
 
     raw_fid    = open(raw_file, 'wb') if do_raw else None
     h5f        = None
@@ -181,12 +183,7 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
     total_ds_frames   = 0
     any_bit_volts     = False
 
-    # Carry state preserves continuity at chunk and file boundaries.
-    # blockmean: partial tail of the last block is prepended to the next chunk.
-    # decimate:  IIR filter state vector is forwarded so there are no transients.
-    if ds_method == 'blockmean':
-        carry = np.empty((num_channels, 0), dtype=np.int16)
-    else:
+    if ds_method != 'blockmean':
         from scipy.signal import cheby1, lfilter
         b_filt, a_filt    = cheby1(8, 0.05, 0.8 / ds_factor)
         filter_order      = max(len(a_filt), len(b_filt)) - 1
@@ -233,22 +230,21 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
                         data = raw.reshape(n_frames, num_channels).T
 
                         if ds_method == 'blockmean':
-                            data       = np.concatenate([carry, data], axis=1)
-                            nf         = data.shape[1]
-                            n_complete = (nf // ds_factor) * ds_factor
-                            carry      = data[:, n_complete:]
-                            if n_complete > 0:
-                                trimmed  = data[:, :n_complete].astype(np.float64)
-                                reshaped = trimmed.reshape(num_channels, ds_factor, -1)
-                                averaged = reshaped.mean(axis=1)
-                                if bit_volts is not None:
-                                    averaged *= bit_volts
-                                data_ds  = averaged.T
-                                n_rows   = data_ds.shape[0]
-                                h5_ds.resize(ds_row_idx + n_rows, axis=0)
-                                h5_ds[ds_row_idx: ds_row_idx + n_rows] = data_ds
-                                ds_row_idx      += n_rows
-                                total_ds_frames += n_rows
+                            n_complete = (n_frames // ds_factor) * ds_factor
+                            if n_complete == 0:
+                                chunk_count += 1
+                                continue
+                            data     = data[:, :n_complete]
+                            reshaped = data.astype(np.float64).reshape(num_channels, ds_factor, -1)
+                            averaged = reshaped.mean(axis=1)
+                            if bit_volts is not None:
+                                averaged *= bit_volts
+                            data_ds  = averaged.T
+                            n_rows   = data_ds.shape[0]
+                            h5_ds.resize(ds_row_idx + n_rows, axis=0)
+                            h5_ds[ds_row_idx: ds_row_idx + n_rows] = data_ds
+                            ds_row_idx      += n_rows
+                            total_ds_frames += n_rows
 
                         else:
                             filtered = np.empty_like(data, dtype=np.float64)
@@ -280,14 +276,6 @@ def combine_and_downsample(config:dict, identifier:str, dependencies:(list,tuple
 
             logger.info(f'  Done ({chunk_count} chunks)')
 
-        if do_ds and ds_method == 'blockmean' and carry.shape[1] > 0:
-            final = carry.astype(np.float64).mean(axis=1, keepdims=True)
-            if bit_volts is not None:
-                final *= bit_volts
-            h5_ds.resize(ds_row_idx + 1, axis=0)
-            h5_ds[ds_row_idx: ds_row_idx + 1] = final.T
-            total_ds_frames += 1
-            logger.info(f'Boundary flush: {carry.shape[1]} leftover frame(s) averaged into 1 output sample')
 
     except BaseException as e:
         if raw_fid:
